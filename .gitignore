@@ -216,3 +216,10 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Project data and generated outputs
+data/
+*.parquet
+.DS_Store
+.ipynb_checkpoints/
+explore_data.ipynb
