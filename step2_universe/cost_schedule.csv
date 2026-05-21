@@ -1,0 +1,6 @@
+cost_component,tier,rate_bps,rate_daily_decimal,applies_to,frequency,notes
+base_roundtrip_trading_cost,,4.0,,turnover_notional,per round trip,Commission + slippage base assumption
+market_impact,,,,order_notional / ADV20,per trade,"impact_bps = 10 * sqrt(order_notional / ADV20), capped at 50 bps"
+borrow_fee,A,40,1.5873015873015872e-05,gross_short_notional,daily,Annual borrow bps divided by 252 trading days
+borrow_fee,B,200,7.936507936507937e-05,gross_short_notional,daily,Annual borrow bps divided by 252 trading days
+borrow_fee,C,800,0.00031746031746031746,gross_short_notional,daily,Annual borrow bps divided by 252 trading days
