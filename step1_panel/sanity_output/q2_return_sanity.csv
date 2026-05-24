@@ -1,0 +1,11 @@
+,value
+stock_days_checked,5322604.0
+implementation_identity_max_residual,4.440892098500626e-16
+implementation_identity_fail_count,0.0
+corp_action_stock_days_gt_1bp,57196.0
+corp_action_stock_days_gt_1bp_pct,1.0745867999948897
+non_corp_action_stock_days,5265408.0
+non_corp_action_max_raw_adjusted_gap,9.996611703477765e-05
+non_corp_action_fail_count_gt_1bp,0.0
+raw_abs_return_gt_50pct_count,569.0
+raw_extreme_neutralised_count,343.0

@@ -1,0 +1,9 @@
+,value
+total_rows,5324348
+n_tickers,1617
+n_instruments,1607
+date_start,2010-01-04
+date_end,2024-12-31
+status_col_used,True
+n_after_dedup,5324348
+tickers_last_before_2024_dec,0

@@ -1,0 +1,12 @@
+,value
+start_date,2010-01-04
+end_date,2024-12-31
+n_days,3774
+terminal_growth_ON,4.112536677528474
+terminal_growth_ID,1.9195345606621301
+terminal_growth_CC,7.68936962403017
+ON_gt_CC,False
+ID_flat_or_negative,False
+brief_shape_pass,False
+years_ON_sharpe_gt_ID,9
+years_total,15

@@ -1,0 +1,26 @@
+# C2O Strategy — Python dependencies
+# Install with: pip install -r requirements.txt
+
+# ── Core data ────────────────────────────────────────────────────────────────
+pandas>=2.0.0
+numpy>=1.26.0
+pyarrow>=14.0.0          # parquet read/write
+
+# ── Statistics & ML ──────────────────────────────────────────────────────────
+scipy>=1.11.0
+scikit-learn>=1.3.0
+statsmodels>=0.14.0
+
+# ── Visualisation ────────────────────────────────────────────────────────────
+matplotlib>=3.8.0
+seaborn>=0.13.0
+
+# ── Reporting ────────────────────────────────────────────────────────────────
+quantstats>=0.0.62       # QuantStats tear-sheet (Section 6.5)
+
+# ── Notebooks ────────────────────────────────────────────────────────────────
+jupyter>=1.0.0
+ipykernel>=6.0.0
+
+# ── Code quality ─────────────────────────────────────────────────────────────
+pytest>=7.4.0
