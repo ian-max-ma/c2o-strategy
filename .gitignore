@@ -31,3 +31,19 @@ Thumbs.db
 # ── Outputs (generated — not source) ─────────────────────────────────────────
 outputs/
 *.html           # QuantStats tear-sheets are generated, not committed
+
+# Local diagnostics and generated data
+check_raw_prices.py
+explore_data.ipynb
+notebooks/
+*.parquet
+
+# Local diagnostics and generated data
+check_raw_prices.py
+explore_data.ipynb
+notebooks/
+*.parquet
+
+notebooks
+
+notebooks
