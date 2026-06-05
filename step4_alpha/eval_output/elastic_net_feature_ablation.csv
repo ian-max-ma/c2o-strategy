@@ -1,0 +1,6 @@
+variant,n_features,mean_ic,std_ic,t_stat,n_days,features
+elastic_net_no_risk,8,0.006253112037137959,0.16257120043394613,1.6141068307138413,1761,"z_feat_r_cc_lag1, z_feat_r_id_lag1, z_feat_log_adv20_lag1, z_feat_log_mcap_lag1, z_feat_dsi_lag1, z_feat_dtcn_lag1, z_feat_ddtcn_lag1, z_feat_htb_flag_lag1"
+elastic_net_all,9,0.005732350530505546,0.23431473092887053,1.0266273375351311,1761,"z_feat_r_cc_lag1, z_feat_r_id_lag1, z_feat_vol20_lag1, z_feat_log_adv20_lag1, z_feat_log_mcap_lag1, z_feat_dsi_lag1, z_feat_dtcn_lag1, z_feat_ddtcn_lag1, z_feat_htb_flag_lag1"
+elastic_net_no_borrow,5,0.005638083164742974,0.2401158246019568,0.9853496641182233,1761,"z_feat_r_cc_lag1, z_feat_r_id_lag1, z_feat_vol20_lag1, z_feat_log_adv20_lag1, z_feat_log_mcap_lag1"
+elastic_net_no_return,7,0.005291824031152227,0.25115287041163803,0.8841927022619958,1761,"z_feat_vol20_lag1, z_feat_log_adv20_lag1, z_feat_log_mcap_lag1, z_feat_dsi_lag1, z_feat_dtcn_lag1, z_feat_ddtcn_lag1, z_feat_htb_flag_lag1"
+elastic_net_no_liquidity_size,7,0.0040782583352190534,0.2509751444391695,0.6819047216751736,1761,"z_feat_r_cc_lag1, z_feat_r_id_lag1, z_feat_vol20_lag1, z_feat_dsi_lag1, z_feat_dtcn_lag1, z_feat_ddtcn_lag1, z_feat_htb_flag_lag1"
