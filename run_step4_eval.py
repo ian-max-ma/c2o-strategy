@@ -9,18 +9,19 @@ from step4_alpha.evaluation import (
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 INPUT_PATH = PROJECT_ROOT / "outputs" / "alpha_scores_ml.parquet"
+BASELINE_INPUT_PATH = PROJECT_ROOT / "outputs" / "alpha_scores.parquet"
+
+OUTPUT_DIR = PROJECT_ROOT / "step4_alpha" / "eval_output"
+OUTPUT_PATH = OUTPUT_DIR / "ic_summary_ml.csv"
+BASELINE_FULL_IC_PATH = OUTPUT_DIR / "ic_baseline_full_sample.csv"
+
+IC_PLOT_PATH = OUTPUT_DIR / "ic_summary_ml.png"
 
 if not INPUT_PATH.exists():
     raise FileNotFoundError(
         "Missing outputs/alpha_scores_ml.parquet. "
         "Please run `python3 run_step4.py` first."
     )
-
-OUTPUT_DIR = PROJECT_ROOT / "step4_alpha" / "eval_output"
-OUTPUT_PATH = OUTPUT_DIR / "ic_summary_ml.csv"
-
-IC_PLOT_PATH = OUTPUT_DIR / "ic_summary_ml.png"
-
 
 if __name__ == "__main__":
 
@@ -43,7 +44,7 @@ if __name__ == "__main__":
         df_model = df.copy()
 
     print(f"Evaluation sample rows: {len(df_model):,}")
-    print(f"Evaluation date range: {df_model['date'].min()} – {df_model['date'].max()}")
+    print(f"Evaluation date range: {df_model['date'].min()} → {df_model['date'].max()}")
 
     ic = ic_summary(df_model, score_cols)
 
@@ -52,6 +53,28 @@ if __name__ == "__main__":
 
     print(f"Saved IC summary to: {OUTPUT_PATH}")
     print(ic.to_string(index=False))
+
+    # Full-sample baseline diagnostic.
+    # This uses the baseline-only alpha file, so it is not restricted to the
+    # 2018-2024 OOS period where ML predictions are available.
+    if BASELINE_INPUT_PATH.exists():
+        df_baseline_full = pd.read_parquet(BASELINE_INPUT_PATH)
+
+        ic_baseline_full = ic_summary(
+            df_baseline_full,
+            score_cols=["score_baseline"],
+            target_col="target_winsorized_demeaned",
+        )
+
+        ic_baseline_full.to_csv(BASELINE_FULL_IC_PATH, index=False)
+
+        print(f"\nSaved full-sample baseline IC to: {BASELINE_FULL_IC_PATH}")
+        print(ic_baseline_full.to_string(index=False))
+    else:
+        print(
+            "\nSkipping full-sample baseline IC: "
+            "outputs/alpha_scores.parquet not found."
+        )
 
     # decile spread check
 

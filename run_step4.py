@@ -40,7 +40,7 @@ if __name__ == "__main__":
         target_col="target_winsorized_demeaned",
         first_pred_year=2018,
         last_pred_year=2024,
-        alpha=0.0001,
+        alpha=0.00001,
         l1_ratio=0.5,
     )
 
