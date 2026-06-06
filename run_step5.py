@@ -248,6 +248,7 @@ def main() -> None:
         print(f"\nCould not load SP500_TR benchmark for benchmark plots: {exc}")
 
     tearsheet_path = OUTPUT_DIR / "quantstats_250M_SP500_TR.html"
+    baseline_tearsheet_path = OUTPUT_DIR / "quantstats_250M_baseline_2010_2024_SP500_TR.html"
     if benchmark is not None:
         try:
             make_quantstats_tearsheet(
@@ -257,6 +258,21 @@ def main() -> None:
                 title=f"C2O Step 5 250M {strategy_name} Strategy Net Returns vs SP500_TR",
             )
             print(f"\nSaved QuantStats tear-sheet: {tearsheet_path}")
+
+            if "score_baseline" in step5_df.columns and step5_df["score_baseline"].notna().any():
+                baseline_summary, baseline_daily, _ = run_aum_backtests(
+                    step5_df,
+                    score_col="score_baseline",
+                    aum_levels={"250M": AUM_LEVELS["250M"]},
+                )
+                make_quantstats_tearsheet(
+                    baseline_daily["250M"],
+                    baseline_tearsheet_path,
+                    benchmark=benchmark,
+                    title="C2O Step 5 250M Baseline 2010-2024 Strategy Net Returns vs SP500_TR",
+                )
+                print(f"Saved baseline QuantStats tear-sheet: {baseline_tearsheet_path}")
+                print(baseline_summary.to_string(index=False))
         except ModuleNotFoundError:
             print(
                 "\nQuantStats is not installed. Install requirements.txt, "
@@ -357,7 +373,7 @@ def main() -> None:
             },
         ]
     )
-    self_check_path = OUTPUT_DIR / "step5_self_check.csv"
+    self_check_path = OUTPUT_DIR / "step5_10_point_check.csv"
     self_check.to_csv(self_check_path, index=False)
     print(f"Saved Step 5 self-check: {self_check_path}")
 
