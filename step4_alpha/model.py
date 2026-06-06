@@ -221,4 +221,8 @@ def expanding_window_random_forest(
 
     df = df.drop(columns=["year"])
 
+<<<<<<< HEAD
     return df
+=======
+    return df
+>>>>>>> origin/main

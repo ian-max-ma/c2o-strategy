@@ -1,0 +1,17 @@
+diagnostic,value,detail
+standard_net_sharpe,-1.3098395681262298,Annualised daily Sharpe with zero risk-free rate.
+lo_adjusted_net_sharpe_lag5,-1.5093245025254753,Autocorrelation-adjusted Sharpe using lags 1-5.
+lag1_autocorrelation,-0.10782921856976672,Daily net-return autocorrelation.
+top_5pct_days_net_return_sum,0.7527088165751501,Sum of the best 89 daily net returns.
+total_net_return_sum,-0.5387002398766229,Arithmetic sum of all daily net returns.
+top_5pct_days_share_of_total_sum,-1.3972683894619038,Negative values can occur when total net return is negative.
+worst_rolling_3m_return,-0.09331359472645284,63 trading-day window ending 2022-09-23.
+worst_rolling_6m_return,-0.15811552575461396,126 trading-day window ending 2022-10-12.
+worst_rolling_12m_return,-0.22625721142341781,252 trading-day window ending 2022-10-25.
+annual_net_sharpe_2018,-2.024747787524921,Net Sharpe for calendar year 2018.
+annual_net_sharpe_2019,-1.5031447416768733,Net Sharpe for calendar year 2019.
+annual_net_sharpe_2020,-0.21241720801136593,Net Sharpe for calendar year 2020.
+annual_net_sharpe_2021,-0.48735352453529457,Net Sharpe for calendar year 2021.
+annual_net_sharpe_2022,-2.521359125228965,Net Sharpe for calendar year 2022.
+annual_net_sharpe_2023,-2.3373263990190893,Net Sharpe for calendar year 2023.
+annual_net_sharpe_2024,-1.2342255225816523,Net Sharpe for calendar year 2024.

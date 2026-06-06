@@ -53,6 +53,16 @@ if __name__ == "__main__":
             "min_samples_leaf": 1000,
             "max_features": "sqrt",
         },
+<<<<<<< HEAD
+=======
+        {
+            "variant": "rf_depth6_leaf100",
+            "n_estimators": 200,
+            "max_depth": 6,
+            "min_samples_leaf": 100,
+            "max_features": "sqrt",
+        }
+>>>>>>> origin/main
     ]
 
     rows = []

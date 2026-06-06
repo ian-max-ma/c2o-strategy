@@ -1,0 +1,8 @@
+item,bps,frequency,applies_to
+commission_per_leg,0.5,entry and exit,traded notional
+auction_slippage_per_leg,1.5,entry and exit,traded notional
+total_per_leg,2.0,entry or exit,traded notional
+roundtrip_commission_slippage,4.0,daily overnight round trip,gross exposure
+tier_A_borrow,40.0,"annual, charged daily / 252",short notional
+tier_B_borrow,200.0,"annual, charged daily / 252",short notional
+tier_C_borrow,800.0,"annual, charged daily / 252",short notional

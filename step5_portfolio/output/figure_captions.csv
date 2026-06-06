@@ -1,0 +1,4 @@
+figure,caption
+gross_to_net_decomposition.png,"Gross-to-net annualised return decomposition for 50M, 250M and 1B AUM. Portfolio uses top/bottom 10% baskets, equal weights within each side, 5% ADV single-name cap, daily dollar-neutral matching after caps, and the fixed Table 6.1 cost schedule."
+assets/calendar_year_net_returns_vs_SP500_TR.png,"Calendar-year compounded net returns for the 250M Random Forest Step 4 ML strategy versus SP500_TR. Portfolio uses top/bottom 10% baskets, equal side weights, and a 5% ADV cap."
+assets/250M_random_forest_strategy_return_quantiles.png,"Distribution of 250M Random Forest strategy net returns after commission, slippage and borrow. Daily returns are compounded to weekly, monthly, quarterly and yearly periods. Assumptions: top/bottom 10% baskets, equal weights, 5% ADV cap."

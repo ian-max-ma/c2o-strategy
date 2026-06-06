@@ -1,0 +1,9 @@
+check,status,evidence
+date_window_policy,pass,mode=report; raw max alpha date=2024-12-31; raw max panel date=2024-12-31; reported max date=2024-12-31; development cutoff=2024-12-31; report mode filters raw inputs before target construction.
+three_aum_table,pass,"performance_summary.csv reports 50M, 250M and 1B."
+fixed_table_6_1_costs,pass,cost_schedule_summary.csv uses 0.5/1.5 bps per leg and A/B/C borrow tiers.
+cap_bites_and_no_breaches,pass,"n_days_with_cap_breach=0; max_single_name_participation=0.0500; cap_bite_detected=True. Cap bite is reported as evidence, while pass/fail is based on no cap breaches."
+quantstats_one_command,pass,"run_step5.py writes the headline OOS QuantStats HTML and, when baseline scores are available, the 2010-2024 baseline reference QuantStats HTML."
+stress_windows,pass,"stress_windows_250M.csv covers 2018_Q4, 2020_Q1, 2022 and 2022_H2."
+robustness_and_borrow_sensitivity,pass,robustness_diagnostics_250M.csv and borrow_sensitivity_250M.csv are generated.
+cap_bite_sensitivity,pass,cap_sensitivity.csv compares 5% ADV cap with a loose-cap reference.

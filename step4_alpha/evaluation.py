@@ -133,4 +133,8 @@ def plot_ic_summary(
     plt.title(title)
     plt.tight_layout()
     plt.savefig(output_path, dpi=200)
+<<<<<<< HEAD
     plt.close()
+=======
+    plt.close()
+>>>>>>> origin/main

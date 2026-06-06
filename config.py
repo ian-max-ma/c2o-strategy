@@ -61,6 +61,7 @@ HTB_DTC_THRESHOLD   = 10          # days-to-cover > 10 → flag as HTB
 # ── Basket construction ───────────────────────────────────────────────────────
 BASKET_QUANTILE     = 0.10        # top & bottom 10% of scores → long/short
 WEIGHTING_SCHEME    = "equal"     # "equal" | "score" | "vol"
+FINAL_SCORE_COL     = "score_random_forest"
 
 # ── Reproducibility ──────────────────────────────────────────────────────────
 RANDOM_SEED         = 42
