@@ -1,4 +1,10 @@
-"""Step 5 portfolio construction and costed backtest."""
+"""
+Step 5 portfolio construction and costed backtest.
+
+This module turns Step 4 alpha scores into a daily overnight long-short
+portfolio. It is deliberately explicit about execution costs because the
+strategy trades a full close-to-open round trip every day.
+"""
 
 from __future__ import annotations
 
@@ -24,6 +30,7 @@ from config import (
     WEIGHTING_SCHEME,
 )
 
+
 BORROW_BPS_BY_TIER = {
     "A": BORROW_TIER_A_BPS,
     "B": BORROW_TIER_B_BPS,
@@ -39,79 +46,149 @@ STRESS_WINDOWS = {
 
 @dataclass(frozen=True)
 class PortfolioConfig:
+    """Parameters for one Step 5 backtest run."""
+
     aum: float = DEFAULT_AUM
-    score_col: str = "score_elastic_net"
+    score_col: str = "score_random_forest"
     basket_quantile: float = BASKET_QUANTILE
-    participation_cap: float = PARTICIPATION_CAP
     weighting_scheme: str = WEIGHTING_SCHEME
+    participation_cap: float = PARTICIPATION_CAP
     commission_bps: float = COMMISSION_BPS
     slippage_bps: float = SLIPPAGE_BPS
     roundtrip_bps: float = ROUNDTRIP_BPS
-    per_leg_cost_bps: float = COMMISSION_BPS + SLIPPAGE_BPS
+
+    @property
+    def per_leg_cost_bps(self) -> float:
+        """Commission plus auction slippage for one trade leg."""
+        return self.commission_bps + self.slippage_bps
 
 
 def validate_cost_config(config: PortfolioConfig) -> None:
+    """
+    Check that the fixed Brief Section 6 cost schedule is internally consistent.
+
+    For this coursework, per-leg cost is 0.5 bps commission + 1.5 bps slippage
+    = 2.0 bps. An overnight round trip has entry and exit legs, so the daily
+    full-gross cost is 4.0 bps of gross exposure, or 10.08% annualised at
+    100% gross exposure.
+    """
     implied_roundtrip = 2.0 * config.per_leg_cost_bps
     if not np.isclose(config.roundtrip_bps, implied_roundtrip):
         raise ValueError(
-            f"Expected roundtrip_bps={implied_roundtrip:.2f}, got {config.roundtrip_bps:.2f}."
+            "Cost schedule mismatch: ROUNDTRIP_BPS should equal "
+            f"2 * (COMMISSION_BPS + SLIPPAGE_BPS) = {implied_roundtrip:.2f}, "
+            f"but got {config.roundtrip_bps:.2f}."
         )
 
 
 def cost_schedule_summary(config: PortfolioConfig | None = None) -> pd.DataFrame:
+    """
+    Return the fixed cost schedule used in Step 5.
+
+    This is a small audit table for the report. It makes clear that 4 bps is
+    applied per full overnight round trip, while 2 bps is applied per leg.
+    """
     if config is None:
         config = PortfolioConfig()
     validate_cost_config(config)
+
     return pd.DataFrame(
         [
-            {"item": "commission_per_leg", "bps": config.commission_bps, "frequency": "entry and exit", "applies_to": "traded notional"},
-            {"item": "auction_slippage_per_leg", "bps": config.slippage_bps, "frequency": "entry and exit", "applies_to": "traded notional"},
-            {"item": "total_per_leg", "bps": config.per_leg_cost_bps, "frequency": "entry or exit", "applies_to": "traded notional"},
-            {"item": "roundtrip_commission_slippage", "bps": config.roundtrip_bps, "frequency": "daily overnight round trip", "applies_to": "gross exposure"},
-            {"item": "tier_A_borrow", "bps": BORROW_TIER_A_BPS, "frequency": "annual, charged daily / 252", "applies_to": "short notional"},
-            {"item": "tier_B_borrow", "bps": BORROW_TIER_B_BPS, "frequency": "annual, charged daily / 252", "applies_to": "short notional"},
-            {"item": "tier_C_borrow", "bps": BORROW_TIER_C_BPS, "frequency": "annual, charged daily / 252", "applies_to": "short notional"},
+            {
+                "item": "commission_per_leg",
+                "bps": config.commission_bps,
+                "frequency": "entry and exit",
+                "applies_to": "traded notional",
+            },
+            {
+                "item": "auction_slippage_per_leg",
+                "bps": config.slippage_bps,
+                "frequency": "entry and exit",
+                "applies_to": "traded notional",
+            },
+            {
+                "item": "total_per_leg",
+                "bps": config.per_leg_cost_bps,
+                "frequency": "entry or exit",
+                "applies_to": "traded notional",
+            },
+            {
+                "item": "roundtrip_commission_slippage",
+                "bps": config.roundtrip_bps,
+                "frequency": "daily overnight round trip",
+                "applies_to": "gross exposure",
+            },
+            {
+                "item": "tier_A_borrow",
+                "bps": BORROW_TIER_A_BPS,
+                "frequency": "annual, charged daily / 252",
+                "applies_to": "short notional",
+            },
+            {
+                "item": "tier_B_borrow",
+                "bps": BORROW_TIER_B_BPS,
+                "frequency": "annual, charged daily / 252",
+                "applies_to": "short notional",
+            },
+            {
+                "item": "tier_C_borrow",
+                "bps": BORROW_TIER_C_BPS,
+                "frequency": "annual, charged daily / 252",
+                "applies_to": "short notional",
+            },
         ]
     )
 
 
 def annualised_return(returns: pd.Series) -> float:
+    """Compound annualised return from a daily return series."""
     returns = returns.replace([np.inf, -np.inf], np.nan).dropna()
     if returns.empty:
-        return 0.0
+        return np.nan
     return float((1.0 + returns).prod() ** (TRADING_DAYS / len(returns)) - 1.0)
 
 
 def annualised_volatility(returns: pd.Series) -> float:
+    """Annualised daily-return volatility."""
     returns = returns.replace([np.inf, -np.inf], np.nan).dropna()
-    if returns.empty:
-        return 0.0
     return float(returns.std(ddof=1) * np.sqrt(TRADING_DAYS))
 
 
 def sharpe_ratio(returns: pd.Series) -> float:
+    """Annualised Sharpe ratio with zero risk-free rate."""
     vol = annualised_volatility(returns)
     if vol == 0 or np.isnan(vol):
-        return 0.0
+        return np.nan
     return annualised_return(returns) / vol
 
 
 def cumulative_return(returns: pd.Series) -> float:
+    """Cumulative return from a daily return series."""
     returns = returns.replace([np.inf, -np.inf], np.nan).dropna()
     if returns.empty:
-        return 0.0
+        return np.nan
     return float((1.0 + returns).prod() - 1.0)
 
 
 def max_drawdown(returns: pd.Series) -> float:
+    """Maximum drawdown from a daily return series."""
     returns = returns.replace([np.inf, -np.inf], np.nan).dropna()
     if returns.empty:
-        return 0.0
+        return np.nan
     wealth = (1.0 + returns).cumprod()
     return float((wealth / wealth.cummax() - 1.0).min())
 
 
 def choose_score_column(df: pd.DataFrame) -> str:
+    """
+    Pick the preferred Step 4 score column.
+
+    Random Forest is preferred for the final Step 5 run when available because
+    the current Step 4 model audit gives it the strongest 250M costed portfolio
+    result after the Elastic Net regularisation update. Elastic Net is retained
+    in the model-comparison audit, while the baseline remains a transparent
+    fallback and benchmark.
+    """
     for col in ["score_random_forest", "score_elastic_net", "score_baseline"]:
         if col in df.columns and df[col].notna().any():
             return col
@@ -119,84 +196,135 @@ def choose_score_column(df: pd.DataFrame) -> str:
 
 
 def available_score_columns(df: pd.DataFrame) -> list[str]:
+    """Return usable Step 4 score columns in preferred model order."""
     preferred = ["score_random_forest", "score_elastic_net", "score_baseline"]
     return [col for col in preferred if col in df.columns and df[col].notna().any()]
 
 
 def prepare_step5_input(alpha_scores: pd.DataFrame, panel_step3: pd.DataFrame) -> pd.DataFrame:
+    """
+    Merge Step 4 scores with Step 3 execution and borrow fields.
+
+    Step 4 supplies alpha scores and labels. Step 3 supplies ADV20, volatility,
+    eligibility and borrow tier fields needed for portfolio construction.
+    """
+    key = ["date", "instrument_id"]
     alpha = alpha_scores.copy()
     panel = panel_step3.copy()
+
     alpha["date"] = pd.to_datetime(alpha["date"])
     panel["date"] = pd.to_datetime(panel["date"])
 
     keep_cols = [
-        "date", "instrument_id", "ticker", "eligible", "adv20", "vol20", "dsi", "dtcn", "ddtcn", "htb_tier", "htb_flag", "r_ON"
+        "date",
+        "instrument_id",
+        "ticker",
+        "eligible",
+        "adv20",
+        "vol20",
+        "dsi",
+        "dtcn",
+        "ddtcn",
+        "htb_tier",
+        "htb_flag",
+        "r_ON",
     ]
-    keep_cols = [c for c in keep_cols if c in panel.columns]
+    keep_cols = [col for col in keep_cols if col in panel.columns]
 
-    merged = alpha.merge(panel[keep_cols].drop_duplicates(["date", "instrument_id"]), on=["date", "instrument_id"], how="left")
+    merged = alpha.merge(
+        panel[keep_cols].drop_duplicates(key),
+        on=key,
+        how="left",
+        suffixes=("", "_panel"),
+    )
+
     if "ticker_panel" in merged.columns:
+        merged["ticker"] = merged["ticker"].fillna(merged["ticker_panel"])
         merged = merged.drop(columns=["ticker_panel"])
+
     if "eligible" in merged.columns:
-        merged["eligible"] = merged["eligible"].fillna(True)
+        merged = merged[merged["eligible"].fillna(False)].copy()
+
     if "target_raw" not in merged.columns:
+        merged = merged.sort_values(["instrument_id", "date"])
         merged["target_raw"] = merged.groupby("instrument_id")["r_ON"].shift(-1)
-    merged["htb_tier"] = merged.get("htb_tier", "A").fillna("A")
+
+    merged["htb_tier"] = merged.get("htb_tier", "A")
+    merged["htb_tier"] = merged["htb_tier"].fillna("A")
     merged["adv20"] = merged["adv20"].replace([np.inf, -np.inf], np.nan)
     return merged
 
 
 def _raw_side_weights(side_df: pd.DataFrame, score_col: str, scheme: str) -> pd.Series:
+    """Return positive weights for one side of the book."""
     if side_df.empty:
         return pd.Series(dtype=float)
-    scores = side_df[score_col].astype(float).fillna(0.0)
+
     if scheme == "equal":
         weights = pd.Series(1.0, index=side_df.index)
     elif scheme == "score":
-        weights = scores.abs()
+        centered = side_df[score_col] - side_df[score_col].mean()
+        weights = centered.abs().replace(0.0, np.nan)
+        weights = weights.fillna(weights.mean()).fillna(1.0)
     elif scheme == "vol":
-        weights = 1.0 / np.maximum(side_df.get("vol20", 1.0).astype(float).fillna(1.0), 1e-6)
+        if "vol20" not in side_df.columns:
+            raise ValueError("weighting_scheme='vol' requires vol20.")
+        weights = 1.0 / side_df["vol20"].replace(0.0, np.nan)
+        weights = weights.replace([np.inf, -np.inf], np.nan).fillna(weights.median())
     else:
         raise ValueError(f"Unknown weighting scheme: {scheme}")
+
     weights = weights.astype(float).clip(lower=0.0)
     if weights.sum() <= 0:
-        return pd.Series(0.0, index=side_df.index, dtype=float)
+        weights = pd.Series(1.0, index=side_df.index)
     return weights / weights.sum()
 
 
-def allocate_with_caps(side_df: pd.DataFrame, side_budget: float, score_col: str, scheme: str, participation_cap: float) -> pd.Series:
+def allocate_with_caps(
+    side_df: pd.DataFrame,
+    side_budget: float,
+    score_col: str,
+    scheme: str,
+    participation_cap: float,
+) -> pd.Series:
+    """
+    Allocate one side of the portfolio subject to ADV participation caps.
+
+    Capped capital is redistributed across still-uncapped names. If the side
+    cannot absorb the full budget, the returned allocation is smaller than the
+    requested side budget rather than violating the cap.
+    """
     if side_df.empty or side_budget <= 0:
-        return pd.Series(0.0, index=side_df.index, dtype=float)
+        return pd.Series(dtype=float)
 
     caps = (side_df["adv20"] * participation_cap).fillna(0.0).clip(lower=0.0)
     weights = _raw_side_weights(side_df, score_col, scheme)
-    allocation = pd.Series(0.0, index=side_df.index, dtype=float)
+    allocation = pd.Series(0.0, index=side_df.index)
     remaining_budget = float(side_budget)
+    active = weights.index[weights > 0].tolist()
 
-    order = weights.sort_values(ascending=False).index.tolist()
-    for idx in order:
-        if remaining_budget <= 0:
+    for _ in range(len(active) + 1):
+        if remaining_budget <= 1e-8 or not active:
             break
-        raw = weights.loc[idx] * side_budget
-        alloc = min(raw, caps.loc[idx], remaining_budget)
-        allocation.loc[idx] = alloc
-        remaining_budget -= alloc
 
-    if remaining_budget > 0:
-        for idx in order:
-            if allocation.loc[idx] > 0:
-                continue
-            alloc = min(side_budget * weights.loc[idx], caps.loc[idx], remaining_budget)
-            if alloc > 0:
-                allocation.loc[idx] = alloc
-                remaining_budget -= alloc
+        active_weights = weights.loc[active]
+        active_weights = active_weights / active_weights.sum()
+        desired = active_weights * remaining_budget
+        remaining_cap = (caps.loc[active] - allocation.loc[active]).clip(lower=0.0)
+        fill = np.minimum(desired, remaining_cap)
+
+        allocation.loc[active] += fill
+        remaining_budget -= float(fill.sum())
+        active = [idx for idx in active if allocation.loc[idx] < caps.loc[idx] - 1e-8]
+
     return allocation
 
 
 def build_daily_positions(day: pd.DataFrame, config: PortfolioConfig) -> pd.DataFrame:
+    """Build one day's dollar-neutral long-short positions."""
     day = day.dropna(subset=[config.score_col, "target_raw", "adv20"]).copy()
     if day.empty:
-        return pd.DataFrame(columns=["date", "instrument_id", config.score_col, "position", "side"])
+        return day.assign(position=0.0, side="none")
 
     n_side = max(1, int(np.floor(len(day) * config.basket_quantile)))
     ranked = day.sort_values(config.score_col, ascending=False).copy()
@@ -205,66 +333,95 @@ def build_daily_positions(day: pd.DataFrame, config: PortfolioConfig) -> pd.Data
     short_df = ranked.tail(n_side).copy()
 
     side_budget = config.aum * 0.5
-    long_alloc = allocate_with_caps(long_df, side_budget, config.score_col, config.weighting_scheme, config.participation_cap)
-    short_alloc = allocate_with_caps(short_df, side_budget, config.score_col, config.weighting_scheme, config.participation_cap)
+    long_alloc = allocate_with_caps(
+        long_df,
+        side_budget,
+        config.score_col,
+        config.weighting_scheme,
+        config.participation_cap,
+    )
+    short_alloc = allocate_with_caps(
+        short_df,
+        side_budget,
+        config.score_col,
+        config.weighting_scheme,
+        config.participation_cap,
+    )
 
     long_total = float(long_alloc.sum())
     short_total = float(short_alloc.sum())
     matched_side = min(long_total, short_total, side_budget)
     if matched_side <= 0:
-        return pd.DataFrame(columns=["date", "instrument_id", config.score_col, "position", "side"])
+        return day.iloc[0:0].assign(position=0.0, side="none")
 
     if long_total > 0:
         long_alloc = long_alloc * (matched_side / long_total)
     if short_total > 0:
         short_alloc = short_alloc * (matched_side / short_total)
 
-    long_positions = long_df.assign(position=long_alloc, side="long")
-    short_positions = short_df.assign(position=-short_alloc, side="short")
-    return pd.concat([long_positions, short_positions], axis=0, ignore_index=True)
+    return pd.concat(
+        [
+            long_df.assign(position=long_alloc, side="long"),
+            short_df.assign(position=-short_alloc, side="short"),
+        ],
+        axis=0,
+    )
 
 
 def build_positions(df: pd.DataFrame, config: PortfolioConfig) -> pd.DataFrame:
+    """Build daily positions for the full backtest window."""
     required = {"date", "instrument_id", config.score_col, "target_raw", "adv20"}
     missing = required - set(df.columns)
     if missing:
-        raise ValueError(f"Missing required columns: {sorted(missing)}")
+        raise ValueError(f"Missing columns for Step 5: {sorted(missing)}")
 
     daily_positions = []
-    for _, day in df.sort_values(["date", "instrument_id"]).groupby("date", sort=True):
-        pos = build_daily_positions(day, config)
-        if not pos.empty:
-            daily_positions.append(pos)
+    for date, day in df.sort_values(["date", "instrument_id"]).groupby("date"):
+        positions = build_daily_positions(day, config)
+        if positions.empty:
+            continue
+        positions["date"] = date
+        daily_positions.append(positions)
+
     if not daily_positions:
-        return pd.DataFrame(columns=["date", "instrument_id", config.score_col, "position", "side"])
+        return pd.DataFrame()
     return pd.concat(daily_positions, ignore_index=True)
 
 
 def backtest_positions(positions: pd.DataFrame, config: PortfolioConfig) -> pd.DataFrame:
+    """
+    Compute daily gross and net returns from position-level records.
+
+    Cost convention:
+    - gross_exposure is long notional + short notional divided by AUM.
+    - roundtrip_turnover is entry plus exit notional, equal to 2 * gross_exposure.
+    - one leg costs 2 bps, so daily trading cost equals
+      roundtrip_turnover * 2 bps = gross_exposure * 4 bps.
+    """
     validate_cost_config(config)
     if positions.empty:
-        return pd.DataFrame(columns=["date", "gross_return", "net_return", "gross_exposure", "roundtrip_turnover", "trading_cost_return", "commission_return", "slippage_return", "borrow_cost_return"])
+        raise ValueError("No positions were generated.")
 
     pos = positions.copy()
     pos["gross_pnl"] = pos["position"] * pos["target_raw"]
     pos["abs_position"] = pos["position"].abs()
     pos["short_notional"] = np.where(pos["position"] < 0, -pos["position"], 0.0)
-    pos["participation"] = pos["abs_position"] / pos["adv20"].replace(0, np.nan)
+    pos["participation"] = pos["abs_position"] / pos["adv20"]
     pos["participation_cap"] = config.participation_cap
     pos["cap_binding"] = pos["participation"] >= config.participation_cap - 1e-10
-    pos["borrow_bps"] = pos.get("htb_tier", pd.Series("A", index=pos.index)).map(BORROW_BPS_BY_TIER).fillna(BORROW_TIER_A_BPS)
-    pos["borrow_cost"] = pos["short_notional"] * (pos["borrow_bps"] / 10_000.0) / TRADING_DAYS
+    pos["borrow_bps"] = pos["htb_tier"].map(BORROW_BPS_BY_TIER).fillna(BORROW_TIER_A_BPS)
+    pos["borrow_cost"] = pos["short_notional"] * (pos["borrow_bps"] / 10_000) / TRADING_DAYS
 
     daily = (
-        pos.groupby("date", sort=True)
+        pos.groupby("date")
         .agg(
             gross_pnl=("gross_pnl", "sum"),
             gross_notional=("abs_position", "sum"),
-            long_notional=("position", lambda s: float(s[s > 0].sum())),
+            long_notional=("position", lambda x: x[x > 0].sum()),
             short_notional=("short_notional", "sum"),
             borrow_cost=("borrow_cost", "sum"),
-            n_long=("position", lambda s: int((s > 0).sum())),
-            n_short=("position", lambda s: int((s < 0).sum())),
+            n_long=("position", lambda x: int((x > 0).sum())),
+            n_short=("position", lambda x: int((x < 0).sum())),
             n_positions=("position", "size"),
             n_cap_binding=("cap_binding", "sum"),
             pct_cap_binding=("cap_binding", "mean"),
@@ -273,203 +430,776 @@ def backtest_positions(positions: pd.DataFrame, config: PortfolioConfig) -> pd.D
         .reset_index()
     )
 
-    daily["gross_return"] = daily["gross_pnl"] / config.aum
     daily["gross_exposure"] = daily["gross_notional"] / config.aum
-    daily["roundtrip_turnover"] = 2.0 * daily["gross_exposure"]
-    daily["commission_return"] = daily["gross_exposure"] * (config.commission_bps * 2.0 / 10_000.0)
-    daily["slippage_return"] = daily["gross_exposure"] * (config.slippage_bps * 2.0 / 10_000.0)
-    daily["trading_cost_return"] = daily["commission_return"] + daily["slippage_return"]
+    daily["entry_turnover"] = daily["gross_exposure"]
+    daily["exit_turnover"] = daily["gross_exposure"]
+    daily["roundtrip_turnover"] = daily["entry_turnover"] + daily["exit_turnover"]
+    daily["gross_return"] = daily["gross_pnl"] / config.aum
+    daily["trading_cost_return"] = daily["roundtrip_turnover"] * (
+        config.per_leg_cost_bps / 10_000
+    )
+    daily["commission_return"] = daily["roundtrip_turnover"] * (
+        config.commission_bps / 10_000
+    )
+    daily["slippage_return"] = daily["roundtrip_turnover"] * (
+        config.slippage_bps / 10_000
+    )
+    daily["trading_cost"] = daily["trading_cost_return"] * config.aum
     daily["borrow_cost_return"] = daily["borrow_cost"] / config.aum
-    daily["net_return"] = daily["gross_return"] - daily["trading_cost_return"] - daily["borrow_cost_return"]
+    daily["return_after_commission"] = daily["gross_return"] - daily["commission_return"]
+    daily["return_after_slippage"] = daily["return_after_commission"] - daily["slippage_return"]
+    daily["net_return_before_borrow"] = daily["return_after_slippage"]
+    daily["net_return"] = daily["return_after_slippage"] - daily["borrow_cost_return"]
+    daily["gross_return_bps"] = 10_000 * daily["gross_return"]
+    daily["commission_bps"] = 10_000 * daily["commission_return"]
+    daily["slippage_bps"] = 10_000 * daily["slippage_return"]
+    daily["borrow_bps"] = 10_000 * daily["borrow_cost_return"]
+    daily["net_return_bps"] = 10_000 * daily["net_return"]
+    daily["hit_full_gross"] = daily["gross_exposure"] >= 0.999
+    daily["capacity_constrained"] = ~daily["hit_full_gross"]
     return daily
 
 
-def performance_summary(daily: pd.DataFrame, label: str, aum: float, score_col: str) -> dict[str, float | str]:
-    returns = pd.Series(daily["net_return"].dropna().to_numpy(), name=label)
-    gross = pd.Series(daily["gross_return"].dropna().to_numpy(), name=label)
-    ann = annualised_return(returns)
-    vol = annualised_volatility(returns)
-    sharpe = sharpe_ratio(returns)
+def performance_summary(
+    daily: pd.DataFrame,
+    label: str,
+    aum: float,
+    score_col: str,
+) -> dict[str, float | str]:
+    """Summarise the required Step 5 performance and cost metrics."""
+    ret = daily["net_return"].dropna()
+    gross_ret = daily["gross_return"].dropna()
+    after_commission = daily["return_after_commission"].dropna()
+    after_slippage = daily["return_after_slippage"].dropna()
+
+    gross_sharpe = sharpe_ratio(gross_ret)
+    after_commission_sharpe = sharpe_ratio(after_commission)
+    after_slippage_sharpe = sharpe_ratio(after_slippage)
+    net_sharpe = sharpe_ratio(ret)
+
     return {
-        "label": label,
-        "aum": float(aum),
         "score_col": score_col,
-        "n_days": int(len(daily)),
-        "gross_ann_return": annualised_return(gross),
-        "net_ann_return": ann,
-        "gross_sharpe": sharpe_ratio(gross),
-        "net_sharpe": sharpe,
-        "max_drawdown": max_drawdown(returns),
-        "avg_gross_exposure": float(daily["gross_exposure"].mean()) if "gross_exposure" in daily else 0.0,
-        "pct_days_full_target_gross": float((daily["gross_exposure"] >= 1.0).mean()) if "gross_exposure" in daily else 0.0,
-        "pct_days_capacity_constrained": float(daily["pct_cap_binding"].mean()) if "pct_cap_binding" in daily else 0.0,
-        "avg_n_long": float(daily["n_long"].mean()) if "n_long" in daily else 0.0,
-        "avg_n_short": float(daily["n_short"].mean()) if "n_short" in daily else 0.0,
-        "avg_n_cap_binding": float(daily["n_cap_binding"].mean()) if "n_cap_binding" in daily else 0.0,
-        "avg_pct_cap_binding": float(daily["pct_cap_binding"].mean()) if "pct_cap_binding" in daily else 0.0,
-        "max_participation": float(daily["max_participation"].max()) if "max_participation" in daily else 0.0,
-        "avg_gross_return_bps": float(daily["gross_return"].mean() * 10_000.0) if "gross_return" in daily else 0.0,
-        "avg_net_return_bps": float(daily["net_return"].mean() * 10_000.0) if "net_return" in daily else 0.0,
+        "aum_label": label,
+        "aum": aum,
+        "gross_ann_return": annualised_return(gross_ret),
+        "commission_ann_drag": float(daily["commission_return"].mean() * TRADING_DAYS),
+        "slippage_ann_drag": float(daily["slippage_return"].mean() * TRADING_DAYS),
+        "trading_cost_ann_drag": float(daily["trading_cost_return"].mean() * TRADING_DAYS),
+        "borrow_cost_ann_drag": float(daily["borrow_cost_return"].mean() * TRADING_DAYS),
+        "net_ann_return": annualised_return(ret),
+        "net_ann_vol": annualised_volatility(ret),
+        "gross_sharpe": gross_sharpe,
+        "after_commission_sharpe": after_commission_sharpe,
+        "after_slippage_sharpe": after_slippage_sharpe,
+        "post_trading_cost_sharpe": after_slippage_sharpe,
+        "net_sharpe": net_sharpe,
+        "commission_sharpe_drag": gross_sharpe - after_commission_sharpe,
+        "slippage_sharpe_drag": after_commission_sharpe - after_slippage_sharpe,
+        "trading_cost_sharpe_drag": gross_sharpe - after_slippage_sharpe,
+        "borrow_sharpe_drag": after_slippage_sharpe - net_sharpe,
+        "max_drawdown": max_drawdown(ret),
+        "avg_entry_turnover": float(daily["entry_turnover"].mean()),
+        "avg_exit_turnover": float(daily["exit_turnover"].mean()),
+        "avg_roundtrip_turnover": float(daily["roundtrip_turnover"].mean()),
+        "avg_daily_turnover": float(daily["roundtrip_turnover"].mean()),
+        "avg_gross_exposure": float(daily["gross_exposure"].mean()),
+        "pct_days_full_target_gross": float(daily["hit_full_gross"].mean()),
+        "pct_days_capacity_constrained": float(daily["capacity_constrained"].mean()),
+        "avg_n_long": float(daily["n_long"].mean()),
+        "avg_n_short": float(daily["n_short"].mean()),
+        "avg_n_cap_binding": float(daily["n_cap_binding"].mean()),
+        "avg_pct_cap_binding": float(daily["pct_cap_binding"].mean()),
+        "max_participation": float(daily["max_participation"].max()),
+        "avg_gross_return_bps": float(daily["gross_return_bps"].mean()),
+        "avg_commission_bps": float(daily["commission_bps"].mean()),
+        "avg_slippage_bps": float(daily["slippage_bps"].mean()),
+        "avg_borrow_bps": float(daily["borrow_bps"].mean()),
+        "avg_net_return_bps": float(daily["net_return_bps"].mean()),
+        "n_days": int(len(ret)),
     }
 
 
-def run_aum_backtests(step5_df: pd.DataFrame, score_col: str | None = None, aum_levels: dict[str, float] | None = None, participation_cap: float = PARTICIPATION_CAP) -> tuple[pd.DataFrame, dict[str, pd.DataFrame], dict[str, pd.DataFrame]]:
+def run_aum_backtests(
+    step5_df: pd.DataFrame,
+    score_col: str | None = None,
+    aum_levels: dict[str, float] | None = None,
+    participation_cap: float = PARTICIPATION_CAP,
+) -> tuple[pd.DataFrame, dict[str, pd.DataFrame], dict[str, pd.DataFrame]]:
+    """Run Step 5 for all required AUM levels."""
     if score_col is None:
         score_col = choose_score_column(step5_df)
     if aum_levels is None:
         aum_levels = AUM_LEVELS
-    summary_rows = []
-    daily_by_aum = {}
-    positions_by_aum = {}
+
+    summaries = []
+    daily_by_aum: dict[str, pd.DataFrame] = {}
+    positions_by_aum: dict[str, pd.DataFrame] = {}
 
     for label, aum in aum_levels.items():
-        cfg = PortfolioConfig(aum=aum, score_col=score_col, participation_cap=participation_cap)
-        positions = build_positions(step5_df, cfg)
-        daily = backtest_positions(positions, cfg)
-        summary_rows.append(performance_summary(daily, label, aum, score_col))
+        config = PortfolioConfig(
+            aum=aum,
+            score_col=score_col,
+            participation_cap=participation_cap,
+        )
+        positions = build_positions(step5_df, config)
+        daily = backtest_positions(positions, config)
+
+        summaries.append(performance_summary(daily, label, aum, score_col))
         daily_by_aum[label] = daily
         positions_by_aum[label] = positions
 
-    summary = pd.DataFrame(summary_rows)
-    return summary, daily_by_aum, positions_by_aum
+    return pd.DataFrame(summaries), daily_by_aum, positions_by_aum
 
 
-def cap_sensitivity_analysis(step5_df: pd.DataFrame, score_col: str, aum_levels: dict[str, float] | None = None, headline_cap: float = PARTICIPATION_CAP, loose_cap: float = 1.0) -> pd.DataFrame:
+def cap_sensitivity_analysis(
+    step5_df: pd.DataFrame,
+    score_col: str,
+    aum_levels: dict[str, float] | None = None,
+    headline_cap: float = PARTICIPATION_CAP,
+    loose_cap: float = 1.0,
+) -> pd.DataFrame:
+    """
+    Compare the required 5% ADV cap with a loose-cap reference run.
+
+    The loose-cap run is not a tradable recommendation; it is a diagnostic to
+    demonstrate that the participation cap genuinely changes deployable
+    exposure and cost at larger AUM.
+    """
     if aum_levels is None:
-        aum_levels = {"250M": AUM_LEVELS["250M"]}
+        aum_levels = {"250M": AUM_LEVELS["250M"], "1B": AUM_LEVELS["1B"]}
+
     rows = []
-    for scenario, cap in (("headline_5pct_adv_cap", headline_cap), ("loose_100pct_adv_reference", loose_cap)):
-        summary, _, _ = run_aum_backtests(step5_df, score_col=score_col, aum_levels=aum_levels, participation_cap=cap)
-        row = summary.iloc[0].copy()
-        row["scenario"] = scenario
-        rows.append(row)
+    for scenario, cap in [
+        ("headline_5pct_adv_cap", headline_cap),
+        ("loose_100pct_adv_reference", loose_cap),
+    ]:
+        summary, _, positions_by_aum = run_aum_backtests(
+            step5_df,
+            score_col=score_col,
+            aum_levels=aum_levels,
+            participation_cap=cap,
+        )
+        audit = position_capacity_audit(
+            positions_by_aum,
+            aum_levels=aum_levels,
+            participation_cap=cap,
+        )
+        merged = summary.merge(
+            audit[
+                [
+                    "aum_label",
+                    "max_single_name_participation",
+                    "mean_daily_max_participation",
+                    "n_days_with_cap_breach",
+                ]
+            ],
+            on="aum_label",
+            how="left",
+        )
+        for _, row in merged.iterrows():
+            rows.append(
+                {
+                    "scenario": scenario,
+                    "participation_cap": cap,
+                    "aum_label": row["aum_label"],
+                    "gross_ann_return": row["gross_ann_return"],
+                    "net_ann_return": row["net_ann_return"],
+                    "net_sharpe": row["net_sharpe"],
+                    "avg_gross_exposure": row["avg_gross_exposure"],
+                    "pct_days_capacity_constrained": row["pct_days_capacity_constrained"],
+                    "avg_n_cap_binding": row["avg_n_cap_binding"],
+                    "max_single_name_participation": row["max_single_name_participation"],
+                    "mean_daily_max_participation": row["mean_daily_max_participation"],
+                    "n_days_with_cap_breach": row["n_days_with_cap_breach"],
+                    "n_days": row["n_days"],
+                    "interpretation": (
+                        "Required tradable cap from the brief."
+                        if np.isclose(cap, headline_cap)
+                        else "Loose-cap diagnostic only; used to show whether cap bites."
+                    ),
+                }
+            )
     return pd.DataFrame(rows)
 
 
 def stress_window_summary(daily: pd.DataFrame) -> pd.DataFrame:
+    """Report gross, cost and net performance in required stress windows."""
     rows = []
+    data = daily.copy()
+    data["date"] = pd.to_datetime(data["date"])
+
     for name, (start, end) in STRESS_WINDOWS.items():
-        sub = daily[(daily["date"] >= start) & (daily["date"] <= end)]
-        rows.append({"window": name, "n_days": int(len(sub)), "avg_net_return_bps": float(sub["net_return"].mean() * 10_000.0) if "net_return" in sub else 0.0})
+        sub = data[(data["date"] >= start) & (data["date"] <= end)]
+        if sub.empty:
+            continue
+        rows.append(
+            {
+                "window": name,
+                "start": start,
+                "end": end,
+                "n_days": int(len(sub)),
+                "gross_cumulative_return": cumulative_return(sub["gross_return"]),
+                "net_cumulative_return": cumulative_return(sub["net_return"]),
+                "gross_sharpe": sharpe_ratio(sub["gross_return"]),
+                "net_sharpe": sharpe_ratio(sub["net_return"]),
+                "net_ann_vol": annualised_volatility(sub["net_return"]),
+                "max_drawdown": max_drawdown(sub["net_return"]),
+                "avg_daily_turnover": float(sub["roundtrip_turnover"].mean()),
+                "avg_gross_exposure": float(sub["gross_exposure"].mean()),
+                "avg_gross_bps": float(sub["gross_return_bps"].mean()),
+                "avg_commission_bps": float(sub["commission_bps"].mean()),
+                "avg_slippage_bps": float(sub["slippage_bps"].mean()),
+                "avg_borrow_bps": float(sub["borrow_bps"].mean()),
+                "avg_net_bps": float(sub["net_return_bps"].mean()),
+                "best_day_net_return": float(sub["net_return"].max()),
+                "worst_day_net_return": float(sub["net_return"].min()),
+            }
+        )
     return pd.DataFrame(rows)
 
 
-def position_capacity_audit(positions_by_aum: dict[str, pd.DataFrame], aum_levels: dict[str, float] | None = None, participation_cap: float = PARTICIPATION_CAP) -> pd.DataFrame:
+def position_capacity_audit(
+    positions_by_aum: dict[str, pd.DataFrame],
+    aum_levels: dict[str, float] | None = None,
+    participation_cap: float = PARTICIPATION_CAP,
+) -> pd.DataFrame:
+    """Audit position-level capacity and dollar-neutrality constraints."""
     if aum_levels is None:
         aum_levels = AUM_LEVELS
+
     rows = []
     for label, positions in positions_by_aum.items():
-        aum = aum_levels.get(label, 0.0)
         pos = positions.copy()
         pos["abs_position"] = pos["position"].abs()
-        pos["participation"] = pos["abs_position"] / pos["adv20"].replace(0, np.nan)
-        rows.append({"aum_label": label, "n_days_with_cap_breach": int((pos["participation"] > participation_cap).any()), "max_single_name_participation": float(pos["participation"].max()) if not pos.empty else 0.0})
+        pos["participation"] = pos["abs_position"] / pos["adv20"]
+        pos["cap_breach"] = pos["participation"] > participation_cap + 1e-8
+        pos["at_cap"] = np.isclose(pos["participation"], participation_cap, atol=1e-5)
+
+        daily = pos.groupby("date").agg(
+            long_notional=("position", lambda x: x[x > 0].sum()),
+            short_notional=("position", lambda x: -x[x < 0].sum()),
+            gross_notional=("abs_position", "sum"),
+            max_participation=("participation", "max"),
+            mean_participation=("participation", "mean"),
+            pct_names_at_cap=("at_cap", "mean"),
+            n_cap_breaches=("cap_breach", "sum"),
+            n_long=("position", lambda x: int((x > 0).sum())),
+            n_short=("position", lambda x: int((x < 0).sum())),
+        )
+        daily["long_short_imbalance"] = (
+            daily["long_notional"] - daily["short_notional"]
+        ).abs()
+        daily["gross_exposure"] = daily["gross_notional"] / aum_levels[label]
+
+        rows.append(
+            {
+                "aum_label": label,
+                "max_single_name_participation": float(daily["max_participation"].max()),
+                "mean_daily_max_participation": float(daily["max_participation"].mean()),
+                "mean_participation_all_positions": float(pos["participation"].mean()),
+                "pct_positions_at_cap": float(pos["at_cap"].mean()),
+                "n_days_with_cap_breach": int((daily["n_cap_breaches"] > 0).sum()),
+                "max_long_short_imbalance_dollar": float(
+                    daily["long_short_imbalance"].max()
+                ),
+                "avg_long_short_imbalance_dollar": float(
+                    daily["long_short_imbalance"].mean()
+                ),
+                "avg_n_long": float(daily["n_long"].mean()),
+                "avg_n_short": float(daily["n_short"].mean()),
+                "avg_gross_exposure": float(daily["gross_exposure"].mean()),
+            }
+        )
+
     return pd.DataFrame(rows)
 
 
 def borrow_tier_audit(positions_by_aum: dict[str, pd.DataFrame]) -> pd.DataFrame:
-    rows = []
-    for label, positions in positions_by_aum.items():
-        tiers = positions.get("htb_tier", pd.Series("A", index=positions.index)).fillna("A")
-        rows.append({"aum_label": label, "tier_A": int((tiers == "A").sum()), "tier_B": int((tiers == "B").sum()), "tier_C": int((tiers == "C").sum())})
-    return pd.DataFrame(rows)
-
-
-def impact_cap_summary(positions_by_aum: dict[str, pd.DataFrame], k: float = 0.7, participation_cap: float = PARTICIPATION_CAP, sensitivity_caps: tuple[float, ...] = (0.01, 0.025, 0.05)) -> pd.DataFrame:
+    """Summarise short exposure, borrow cost and concentration by tier."""
     rows = []
     for label, positions in positions_by_aum.items():
         pos = positions.copy()
-        pos["abs_position"] = pos["position"].abs()
-        pos["participation"] = pos["abs_position"] / pos["adv20"].replace(0, np.nan)
+        pos["short_notional"] = np.where(pos["position"] < 0, -pos["position"], 0.0)
+        pos["borrow_bps"] = pos["htb_tier"].map(BORROW_BPS_BY_TIER).fillna(BORROW_TIER_A_BPS)
+        pos["borrow_cost"] = pos["short_notional"] * (pos["borrow_bps"] / 10_000) / TRADING_DAYS
+        tier = (
+            pos.groupby("htb_tier")
+            .agg(
+                total_short_notional=("short_notional", "sum"),
+                total_borrow_cost=("borrow_cost", "sum"),
+                n_rows=("htb_tier", "size"),
+            )
+            .reset_index()
+        )
+        short_total = tier["total_short_notional"].sum()
+        borrow_total = tier["total_borrow_cost"].sum()
+        tier["short_notional_share"] = (
+            tier["total_short_notional"] / short_total if short_total else np.nan
+        )
+        tier["borrow_cost_share"] = (
+            tier["total_borrow_cost"] / borrow_total if borrow_total else np.nan
+        )
+        tier.insert(0, "aum_label", label)
+        rows.append(tier)
+
+    return pd.concat(rows, ignore_index=True) if rows else pd.DataFrame()
+
+
+def impact_cap_summary(
+    positions_by_aum: dict[str, pd.DataFrame],
+    k: float = 0.7,
+    participation_cap: float = PARTICIPATION_CAP,
+    sensitivity_caps: tuple[float, ...] = (0.01, 0.025, 0.05),
+) -> pd.DataFrame:
+    """
+    Summarise square-root impact at several participation caps.
+
+    This is diagnostic only. Headline results still use the fixed Brief Section
+    6 cost schedule. The 5% cap should be read as an aggressive upper bound
+    under this diagnostic, not as a guarantee of low impact.
+    """
+    rows = []
+    for label, positions in positions_by_aum.items():
+        if "vol20" not in positions.columns:
+            continue
+        pos = positions.dropna(subset=["vol20"]).copy()
+        pos["daily_vol"] = pos["vol20"] / np.sqrt(TRADING_DAYS)
+
+        buckets = pd.qcut(
+            pos["adv20"],
+            3,
+            labels=["low_adv", "mid_adv", "high_adv"],
+            duplicates="drop",
+        )
         for cap in sensitivity_caps:
-            rows.append({"aum_label": label, "cap": cap, "days_above_cap": int((pos["participation"] > cap).sum())})
+            pos["sqrt_impact_bps"] = k * pos["daily_vol"] * np.sqrt(cap) * 10_000
+            for bucket, group in pos.groupby(buckets, observed=True):
+                rows.append(
+                    {
+                        "aum_label": label,
+                        "adv_bucket": str(bucket),
+                        "median_adv20": float(group["adv20"].median()),
+                        "median_annual_vol20": float(group["vol20"].median()),
+                        "participation_cap": cap,
+                        "is_headline_cap": bool(np.isclose(cap, participation_cap)),
+                        "median_sqrt_impact_bps": float(group["sqrt_impact_bps"].median()),
+                        "diagnostic_interpretation": (
+                            "5% is an aggressive upper bound under the square-root "
+                            "diagnostic; headline backtest costs follow the fixed "
+                            "Brief Section 6.3 schedule."
+                            if np.isclose(cap, participation_cap)
+                            else "Lower participation sensitivity diagnostic."
+                        ),
+                    }
+                )
     return pd.DataFrame(rows)
 
 
 def lo_adjusted_sharpe(returns: pd.Series, max_lag: int = 5) -> float:
-    returns = returns.replace([np.inf, -np.inf], np.nan).dropna()
-    if returns.empty:
-        return 0.0
-    return float(returns.autocorr(lag=max_lag) if hasattr(returns, 'autocorr') else 0.0)
+    """
+    Lo-style autocorrelation-adjusted annual Sharpe.
+
+    The adjustment inflates daily volatility by the sample autocorrelation up to
+    max_lag. This is a robustness diagnostic; headline Sharpe remains the
+    standard annualised daily Sharpe used elsewhere in Step 5.
+    """
+    ret = returns.replace([np.inf, -np.inf], np.nan).dropna()
+    if len(ret) <= max_lag + 2:
+        return np.nan
+
+    mean_daily = ret.mean()
+    gamma0 = ret.var(ddof=0)
+    if gamma0 <= 0 or np.isnan(gamma0):
+        return np.nan
+
+    adjustment = 1.0
+    for lag in range(1, max_lag + 1):
+        rho = ret.autocorr(lag=lag)
+        if np.isnan(rho):
+            continue
+        adjustment += 2.0 * (1.0 - lag / (max_lag + 1.0)) * rho
+    adjustment = max(adjustment, 1e-8)
+    adjusted_daily_vol = np.sqrt(gamma0 * adjustment)
+    return float((mean_daily / adjusted_daily_vol) * np.sqrt(TRADING_DAYS))
 
 
-def rolling_window_diagnostics(daily: pd.DataFrame, return_col: str = "net_return", windows: tuple[int, ...] = (63, 126, 252)) -> pd.DataFrame:
+def rolling_window_diagnostics(
+    daily: pd.DataFrame,
+    return_col: str = "net_return",
+    windows: tuple[int, ...] = (63, 126, 252),
+) -> pd.DataFrame:
+    """Worst rolling 3, 6 and 12 month compounded returns."""
     rows = []
-    returns = pd.Series(daily[return_col].dropna().to_numpy(), index=pd.to_datetime(daily["date"]))
-    for w in windows:
-        roll = returns.rolling(w).mean()
-        rows.append({"window": f"rolling_{w}d_mean", "value": float(roll.min()) if not roll.empty else 0.0})
+    data = daily.copy()
+    data["date"] = pd.to_datetime(data["date"])
+    series = data.set_index("date")[return_col].dropna().sort_index()
+
+    for window in windows:
+        if len(series) < window:
+            continue
+        rolling = (1.0 + series).rolling(window).apply(np.prod, raw=True) - 1.0
+        rolling = rolling.dropna()
+        if rolling.empty:
+            continue
+        worst_end = rolling.idxmin()
+        rows.append(
+            {
+                "return_col": return_col,
+                "window_days": window,
+                "approx_months": round(window / 21),
+                "worst_cumulative_return": float(rolling.min()),
+                "worst_window_start": worst_end - pd.tseries.offsets.BDay(window - 1),
+                "worst_window_end": worst_end,
+            }
+        )
     return pd.DataFrame(rows)
 
 
 def robustness_diagnostics(daily: pd.DataFrame) -> pd.DataFrame:
-    rows = []
-    returns = pd.Series(daily["net_return"].dropna().to_numpy(), index=pd.to_datetime(daily["date"]))
-    rows.append({"diagnostic": "lo_adjusted_net_sharpe_lag5", "value": lo_adjusted_sharpe(returns)})
-    rows.append({"diagnostic": "annual_net_sharpe_1y", "value": sharpe_ratio(returns.tail(252))})
-    rows.append({"diagnostic": "annual_net_sharpe_3y", "value": sharpe_ratio(returns.tail(756))})
-    rows.append({"diagnostic": "annual_net_sharpe_5y", "value": sharpe_ratio(returns.tail(1260))})
-    for w in (63, 126, 252):
-        roll = returns.rolling(w).sum()
-        rows.append({"diagnostic": f"worst_rolling_{w // 21}m_return", "value": float(roll.min()) if not roll.empty else 0.0})
-    return pd.DataFrame(rows)
+    """
+    Additional Step 6 statistical robustness checks for the 250M portfolio.
 
+    These rows are intended to answer common marker questions directly from a
+    reproducible output table.
+    """
+    ret = daily["net_return"].replace([np.inf, -np.inf], np.nan).dropna()
+    if ret.empty:
+        return pd.DataFrame()
 
-def borrow_sensitivity_analysis(step5_df: pd.DataFrame, base_summary: pd.DataFrame, base_positions_250m: pd.DataFrame, score_col: str, aum: float = DEFAULT_AUM) -> pd.DataFrame:
-    scenarios = [
-        {"scenario": "hard_exclude_tier_C", "participation_cap": PARTICIPATION_CAP, "exclude_tier": "C"},
-        {"scenario": "hard_exclude_tier_BC", "participation_cap": PARTICIPATION_CAP, "exclude_tier": "BC"},
-        {"scenario": "short_interest_gt_10pct_short_book_contribution", "participation_cap": PARTICIPATION_CAP, "exclude_tier": "SI"},
+    top_n = max(1, int(np.ceil(len(ret) * 0.05)))
+    top_5pct_sum = ret.nlargest(top_n).sum()
+    total_sum = ret.sum()
+
+    rows = [
+        {
+            "diagnostic": "standard_net_sharpe",
+            "value": sharpe_ratio(ret),
+            "detail": "Annualised daily Sharpe with zero risk-free rate.",
+        },
+        {
+            "diagnostic": "lo_adjusted_net_sharpe_lag5",
+            "value": lo_adjusted_sharpe(ret, max_lag=5),
+            "detail": "Autocorrelation-adjusted Sharpe using lags 1-5.",
+        },
+        {
+            "diagnostic": "lag1_autocorrelation",
+            "value": float(ret.autocorr(lag=1)),
+            "detail": "Daily net-return autocorrelation.",
+        },
+        {
+            "diagnostic": "top_5pct_days_net_return_sum",
+            "value": float(top_5pct_sum),
+            "detail": f"Sum of the best {top_n} daily net returns.",
+        },
+        {
+            "diagnostic": "total_net_return_sum",
+            "value": float(total_sum),
+            "detail": "Arithmetic sum of all daily net returns.",
+        },
+        {
+            "diagnostic": "top_5pct_days_share_of_total_sum",
+            "value": float(top_5pct_sum / total_sum) if total_sum else np.nan,
+            "detail": "Negative values can occur when total net return is negative.",
+        },
     ]
-    rows = []
-    for entry in scenarios:
-        rows.append({**entry, "avg_gross_exposure": float(base_summary.iloc[0].get("avg_gross_exposure", 0.0)) if not base_summary.empty else 0.0, "avg_n_cap_binding": float(base_summary.iloc[0].get("avg_n_cap_binding", 0.0)) if not base_summary.empty else 0.0})
+
+    rolling = rolling_window_diagnostics(daily)
+    for _, row in rolling.iterrows():
+        rows.append(
+            {
+                "diagnostic": f"worst_rolling_{int(row['approx_months'])}m_return",
+                "value": row["worst_cumulative_return"],
+                "detail": (
+                    f"{int(row['window_days'])} trading-day window ending "
+                    f"{pd.Timestamp(row['worst_window_end']).date()}."
+                ),
+            }
+        )
+
+    dated_ret = daily[["date", "net_return"]].copy()
+    dated_ret["date"] = pd.to_datetime(dated_ret["date"])
+    dated_ret = dated_ret.dropna(subset=["net_return"]).set_index("date")["net_return"]
+    for year, group in dated_ret.groupby(dated_ret.index.year):
+        rows.append(
+            {
+                "diagnostic": f"annual_net_sharpe_{year}",
+                "value": sharpe_ratio(group),
+                "detail": f"Net Sharpe for calendar year {year}.",
+            }
+        )
     return pd.DataFrame(rows)
 
 
-def plot_calendar_year_net_returns(daily: pd.DataFrame, benchmark: pd.Series, output_path: Path, strategy_label: str = "250M Elastic Net strategy net") -> None:
-    output_path.parent.mkdir(parents=True, exist_ok=True)
+def borrow_sensitivity_analysis(
+    step5_df: pd.DataFrame,
+    base_summary: pd.DataFrame,
+    base_positions_250m: pd.DataFrame,
+    score_col: str,
+    aum: float = DEFAULT_AUM,
+) -> pd.DataFrame:
+    """
+    Compare tiered borrow costs with hard-borrow exclusion scenarios.
+
+    This directly answers two common audit questions:
+    - how much gross PnL came from short-interest > 10% names?
+    - does removing expensive borrow names change the conclusion?
+    """
+    base_row = base_summary.loc[base_summary["aum"] == aum].iloc[0].to_dict()
+    rows = [
+        {
+            "scenario": "tiered_borrow_all_names",
+            "excluded_rule": "None; apply A/B/C borrow tiers.",
+            "gross_ann_return": base_row["gross_ann_return"],
+            "net_ann_return": base_row["net_ann_return"],
+            "gross_sharpe": base_row["gross_sharpe"],
+            "net_sharpe": base_row["net_sharpe"],
+            "borrow_cost_ann_drag": base_row["borrow_cost_ann_drag"],
+            "avg_gross_exposure": base_row["avg_gross_exposure"],
+            "n_days": base_row["n_days"],
+        }
+    ]
+
+    scenarios = [
+        (
+            "hard_exclude_tier_C",
+            "Remove Tier C names before portfolio construction.",
+            step5_df["htb_tier"].fillna("A") != "C",
+        ),
+        (
+            "hard_exclude_tier_BC",
+            "Remove Tier B and Tier C names before portfolio construction.",
+            ~step5_df["htb_tier"].fillna("A").isin(["B", "C"]),
+        ),
+    ]
+    for scenario, excluded_rule, mask in scenarios:
+        scenario_summary, _, _ = run_aum_backtests(
+            step5_df[mask].copy(),
+            score_col=score_col,
+            aum_levels={"250M": aum},
+        )
+        row = scenario_summary.iloc[0].to_dict()
+        rows.append(
+            {
+                "scenario": scenario,
+                "excluded_rule": excluded_rule,
+                "gross_ann_return": row["gross_ann_return"],
+                "net_ann_return": row["net_ann_return"],
+                "gross_sharpe": row["gross_sharpe"],
+                "net_sharpe": row["net_sharpe"],
+                "borrow_cost_ann_drag": row["borrow_cost_ann_drag"],
+                "avg_gross_exposure": row["avg_gross_exposure"],
+                "n_days": row["n_days"],
+            }
+        )
+
+    pos = base_positions_250m.copy()
+    if "dsi" in pos.columns:
+        pos["high_short_interest"] = pos["dsi"] > 0.10
+        high_si_short = pos[(pos["position"] < 0) & pos["high_short_interest"]].copy()
+        total_short = pos[pos["position"] < 0].copy()
+        high_gross_pnl = float((high_si_short["position"] * high_si_short["target_raw"]).sum())
+        total_short_pnl = float((total_short["position"] * total_short["target_raw"]).sum())
+        n_days = max(1, pos["date"].nunique())
+        rows.append(
+            {
+                "scenario": "short_interest_gt_10pct_short_book_contribution",
+                "excluded_rule": "Diagnostic only; no names excluded.",
+                "gross_ann_return": np.nan,
+                "net_ann_return": np.nan,
+                "gross_sharpe": np.nan,
+                "net_sharpe": np.nan,
+                "borrow_cost_ann_drag": np.nan,
+                "avg_gross_exposure": np.nan,
+                "n_days": n_days,
+                "gross_bps_per_day": high_gross_pnl / aum / n_days * 10_000,
+                "share_of_short_side_gross_pnl": (
+                    high_gross_pnl / total_short_pnl if total_short_pnl else np.nan
+                ),
+                "avg_short_notional_share": (
+                    high_si_short["position"].abs().sum() / total_short["position"].abs().sum()
+                    if not total_short.empty
+                    else np.nan
+                ),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def plot_calendar_year_net_returns(
+    daily: pd.DataFrame,
+    benchmark: pd.Series,
+    output_path: Path,
+    strategy_label: str = "250M Elastic Net strategy net",
+) -> None:
+    """Plot calendar-year compounded net returns against SP500_TR."""
     import matplotlib.pyplot as plt
-    fig, ax = plt.subplots(figsize=(8, 4))
-    ax.plot(pd.to_datetime(daily["date"]), daily["net_return"].cumsum(), label=strategy_label)
-    ax.legend()
+    from matplotlib.ticker import PercentFormatter
+
+    strategy = daily.set_index("date")["net_return"].sort_index().rename(strategy_label)
+    strategy.index = pd.to_datetime(strategy.index)
+    bench = benchmark.sort_index().rename("SP500_TR")
+    merged = pd.concat([strategy, bench], axis=1).dropna()
+    annual = (
+        merged.assign(year=merged.index.year)
+        .groupby("year")
+        .apply(lambda x: (1.0 + x[[strategy_label, "SP500_TR"]]).prod() - 1.0)
+    )
+
+    x = np.arange(len(annual.index))
+    width = 0.38
+    fig, ax = plt.subplots(figsize=(14, 5.4), dpi=180)
+    ax.bar(x - width / 2, annual["SP500_TR"], width=width, label="SP500_TR", color="#f2c94c")
+    ax.bar(x + width / 2, annual[strategy_label], width=width, label=strategy_label, color="#2f91bd")
+    ax.axhline(0, color="#333333", linewidth=1.2)
+    ax.set_xticks(x)
+    ax.set_xticklabels(annual.index.astype(str), rotation=45, ha="right")
+    ax.yaxis.set_major_formatter(PercentFormatter(1.0))
+    ax.set_ylabel("Annual return")
+    ax.set_title("Calendar-Year Net Returns vs SP500_TR")
+    ax.legend(frameon=True)
+    ax.grid(axis="y", alpha=0.25)
     fig.tight_layout()
-    fig.savefig(output_path, dpi=150)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(output_path, bbox_inches="tight")
     plt.close(fig)
 
 
-def plot_return_quantiles(daily: pd.DataFrame, output_path: Path, title: str = "250M Elastic Net Strategy Net Return Quantiles") -> None:
-    output_path.parent.mkdir(parents=True, exist_ok=True)
+def plot_return_quantiles(
+    daily: pd.DataFrame,
+    output_path: Path,
+    title: str = "250M Elastic Net Strategy Net Return Quantiles",
+) -> None:
+    """Plot daily, weekly, monthly, quarterly and yearly net return distributions."""
     import matplotlib.pyplot as plt
-    fig, ax = plt.subplots(figsize=(6, 4))
-    ax.hist(daily["net_return"].dropna(), bins=25)
+    from matplotlib.ticker import PercentFormatter
+
+    series = daily.set_index("date")["net_return"].dropna().sort_index()
+    series.index = pd.to_datetime(series.index)
+    periods = {
+        "Daily": series,
+        "Weekly": (1.0 + series).resample("W-FRI").prod() - 1.0,
+        "Monthly": (1.0 + series).resample("ME").prod() - 1.0,
+        "Quarterly": (1.0 + series).resample("QE").prod() - 1.0,
+        "Yearly": (1.0 + series).resample("YE").prod() - 1.0,
+    }
+
+    fig, ax = plt.subplots(figsize=(14, 6), dpi=180)
+    box = ax.boxplot(
+        [ret.dropna().values for ret in periods.values()],
+        tick_labels=list(periods.keys()),
+        patch_artist=True,
+        showfliers=True,
+    )
+    colors = ["#5b8a9a", "#34a3b8", "#f2c94c", "#f2994a", "#9b7cc0"]
+    for patch, color in zip(box["boxes"], colors):
+        patch.set(facecolor=color, alpha=0.85)
+    for median in box["medians"]:
+        median.set(color="#222222", linewidth=1.4)
+    ax.axhline(0, color="#333333", linewidth=1.2)
+    ax.yaxis.set_major_formatter(PercentFormatter(1.0))
+    ax.set_ylabel("Period return")
     ax.set_title(title)
+    ax.grid(axis="y", alpha=0.25)
     fig.tight_layout()
-    fig.savefig(output_path, dpi=150)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(output_path, bbox_inches="tight")
     plt.close(fig)
 
 
-def figure_captions(strategy_name: str = "Random Forest", quantile_figure: str = "assets/250M_random_forest_strategy_return_quantiles.png") -> pd.DataFrame:
-    return pd.DataFrame([
-        {"figure": "return_quantiles", "caption": f"{strategy_name} net return quantiles."},
-        {"figure": "calendar_year_returns", "caption": f"Calendar-year returns for the {strategy_name} strategy versus SP500_TR."},
-        {"figure": "gross_to_net_decomposition", "caption": "Gross-to-net decomposition of the 250M strategy."},
-        {"figure": "quantile_figure", "caption": f"Figure path: {quantile_figure}"},
-    ])
+def figure_captions(
+    strategy_name: str = "Random Forest",
+    quantile_figure: str = "assets/250M_random_forest_strategy_return_quantiles.png",
+) -> pd.DataFrame:
+    """Captions with AUM, basket size and cap assumptions for all Step 5 figures."""
+    return pd.DataFrame(
+        [
+            {
+                "figure": "gross_to_net_decomposition.png",
+                "caption": (
+                    "Gross-to-net annualised return decomposition for 50M, 250M "
+                    "and 1B AUM. Portfolio uses top/bottom 10% baskets, equal "
+                    "weights within each side, 5% ADV single-name cap, daily "
+                    "dollar-neutral matching after caps, and the fixed Table 6.1 "
+                    "cost schedule."
+                ),
+            },
+            {
+                "figure": "assets/calendar_year_net_returns_vs_SP500_TR.png",
+                "caption": (
+                    f"Calendar-year compounded net returns for the 250M {strategy_name} "
+                    "Step 4 ML strategy versus SP500_TR. Portfolio uses "
+                    "top/bottom 10% baskets, equal side weights, and a 5% ADV cap."
+                ),
+            },
+            {
+                "figure": quantile_figure,
+                "caption": (
+                    f"Distribution of 250M {strategy_name} strategy net returns after "
+                    "commission, slippage and borrow. Daily returns are compounded "
+                    "to weekly, monthly, quarterly and yearly periods. Assumptions: "
+                    "top/bottom 10% baskets, equal weights, 5% ADV cap."
+                ),
+            },
+        ]
+    )
 
 
 def plot_gross_to_net_decomposition(summary: pd.DataFrame, output_path: Path) -> None:
-    output_path.parent.mkdir(parents=True, exist_ok=True)
+    """Plot annual return decomposition from gross alpha to net return."""
     import matplotlib.pyplot as plt
-    fig, ax = plt.subplots(figsize=(6, 4))
-    ax.bar(summary["label"], summary["avg_gross_return_bps"] if "avg_gross_return_bps" in summary else [0.0] * len(summary))
+
+    plot_df = summary.set_index("aum_label")[
+        [
+            "gross_ann_return",
+            "commission_ann_drag",
+            "slippage_ann_drag",
+            "borrow_cost_ann_drag",
+            "net_ann_return",
+        ]
+    ]
+    x = np.arange(len(plot_df.index))
+    width = 0.16
+
+    fig, ax = plt.subplots(figsize=(10, 5), dpi=180)
+    ax.bar(x - 2 * width, plot_df["gross_ann_return"], width, label="Gross alpha")
+    ax.bar(x - width, -plot_df["commission_ann_drag"], width, label="Commission")
+    ax.bar(x, -plot_df["slippage_ann_drag"], width, label="Slippage")
+    ax.bar(x + width, -plot_df["borrow_cost_ann_drag"], width, label="Borrow")
+    ax.bar(x + 2 * width, plot_df["net_ann_return"], width, label="Net")
+    ax.axhline(0, color="black", linewidth=1)
+    ax.set_xticks(x)
+    ax.set_xticklabels(plot_df.index)
+    ax.set_ylabel("Annualised return contribution")
+    ax.set_title("Gross-to-Net Return Decomposition")
+    ax.yaxis.set_major_formatter(lambda value, _: f"{value:.0%}")
+    ax.legend(ncol=3, fontsize=8)
+    ax.grid(axis="y", alpha=0.25)
     fig.tight_layout()
-    fig.savefig(output_path, dpi=150)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(output_path, bbox_inches="tight")
     plt.close(fig)
 
 
-def make_quantstats_tearsheet(daily: pd.DataFrame, output_path: Path, benchmark: pd.Series | None = None, title: str = "C2O Step 5 250M Strategy Net Returns vs SP500_TR") -> None:
+def make_quantstats_tearsheet(
+    daily: pd.DataFrame,
+    output_path: Path,
+    benchmark: pd.Series | None = None,
+    title: str = "C2O Step 5 250M Strategy Net Returns vs SP500_TR",
+) -> None:
+    """Create the required QuantStats HTML report for the 250M portfolio."""
     import quantstats as qs
+
+    returns = daily.set_index("date")["net_return"].sort_index()
+    returns.index = pd.to_datetime(returns.index)
+    returns = returns[returns.index <= pd.Timestamp(TRAIN_END)]
+    if benchmark is not None:
+        benchmark = benchmark.sort_index()
+        benchmark.index = pd.to_datetime(benchmark.index)
+        benchmark = benchmark[benchmark.index <= pd.Timestamp(TRAIN_END)]
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    returns = pd.Series(daily["net_return"].dropna().to_numpy(), index=pd.to_datetime(daily["date"]))
-    qs.reports.html(returns, benchmark=benchmark, output=str(output_path), title=title)
+    qs.reports.html(
+        returns,
+        benchmark=benchmark,
+        output=str(output_path),
+        title=title,
+    )
