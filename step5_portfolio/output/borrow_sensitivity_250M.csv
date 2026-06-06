@@ -1,0 +1,5 @@
+scenario,excluded_rule,gross_ann_return,net_ann_return,gross_sharpe,net_sharpe,borrow_cost_ann_drag,avg_gross_exposure,n_days,gross_bps_per_day,share_of_short_side_gross_pnl,avg_short_notional_share
+tiered_borrow_all_names,None; apply A/B/C borrow tiers.,0.025920750503777068,-0.07575049746769746,0.4481893334382032,-1.3098395681262298,0.003606510656904763,0.9994608819818555,1761,,,
+hard_exclude_tier_C,Remove Tier C names before portfolio construction.,0.02708374470163144,-0.0742646865344081,0.4704668729901155,-1.2900748593064955,0.0031337544725469103,0.9994608819818555,1761,,,
+hard_exclude_tier_BC,Remove Tier B and Tier C names before portfolio construction.,0.026533636262660254,-0.07370989886391688,0.46312289042507626,-1.286540089295997,0.0019989217639637103,0.9994608819818555,1761,,,
+short_interest_gt_10pct_short_book_contribution,Diagnostic only; no names excluded.,,,,,,,1761,-0.2813792197540207,0.1279989697112817,0.07443348452017191

@@ -22,6 +22,7 @@ from config import (
     BORROW_TIER_C_BPS,
     COMMISSION_BPS,
     DEFAULT_AUM,
+    FINAL_SCORE_COL,
     PARTICIPATION_CAP,
     ROUNDTRIP_BPS,
     SLIPPAGE_BPS,
@@ -41,6 +42,7 @@ STRESS_WINDOWS = {
     "2018_Q4": ("2018-10-01", "2018-12-31"),
     "2020_Q1": ("2020-01-01", "2020-03-31"),
     "2022": ("2022-01-01", "2022-12-31"),
+    "2022_H2": ("2022-07-01", "2022-12-31"),
 }
 
 
@@ -181,15 +183,14 @@ def max_drawdown(returns: pd.Series) -> float:
 
 def choose_score_column(df: pd.DataFrame) -> str:
     """
-    Pick the preferred Step 4 score column.
+    Pick the pre-specified final Step 4 score column.
 
-    Random Forest is preferred for the final Step 5 run when available because
-    the current Step 4 model audit gives it the strongest 250M costed portfolio
-    result after the Elastic Net regularisation update. Elastic Net is retained
-    in the model-comparison audit, while the baseline remains a transparent
-    fallback and benchmark.
+    The headline Step 5 run uses the model selected in Step 4 before portfolio
+    construction. Other score columns are retained only for diagnostic
+    comparison, not for ex-post portfolio selection.
     """
-    for col in ["score_random_forest", "score_elastic_net", "score_baseline"]:
+    preferred = [FINAL_SCORE_COL, "score_elastic_net", "score_baseline"]
+    for col in dict.fromkeys(preferred):
         if col in df.columns and df[col].notna().any():
             return col
     raise ValueError("No usable Step 4 score column found.")
@@ -395,8 +396,7 @@ def backtest_positions(positions: pd.DataFrame, config: PortfolioConfig) -> pd.D
     Cost convention:
     - gross_exposure is long notional + short notional divided by AUM.
     - roundtrip_turnover is entry plus exit notional, equal to 2 * gross_exposure.
-    - one leg costs 2 bps, so daily trading cost equals
-      roundtrip_turnover * 2 bps = gross_exposure * 4 bps.
+    - the full overnight round trip costs 4 bps of gross exposure.
     """
     validate_cost_config(config)
     if positions.empty:
@@ -435,8 +435,8 @@ def backtest_positions(positions: pd.DataFrame, config: PortfolioConfig) -> pd.D
     daily["exit_turnover"] = daily["gross_exposure"]
     daily["roundtrip_turnover"] = daily["entry_turnover"] + daily["exit_turnover"]
     daily["gross_return"] = daily["gross_pnl"] / config.aum
-    daily["trading_cost_return"] = daily["roundtrip_turnover"] * (
-        config.per_leg_cost_bps / 10_000
+    daily["trading_cost_return"] = daily["gross_exposure"] * (
+        config.roundtrip_bps / 10_000
     )
     daily["commission_return"] = daily["roundtrip_turnover"] * (
         config.commission_bps / 10_000
@@ -807,8 +807,9 @@ def lo_adjusted_sharpe(returns: pd.Series, max_lag: int = 5) -> float:
     if len(ret) <= max_lag + 2:
         return np.nan
 
+    demeaned = ret - ret.mean()
     mean_daily = ret.mean()
-    gamma0 = ret.var(ddof=0)
+    gamma0 = float(np.mean(demeaned * demeaned))
     if gamma0 <= 0 or np.isnan(gamma0):
         return np.nan
 
@@ -943,6 +944,10 @@ def borrow_sensitivity_analysis(
     This directly answers two common audit questions:
     - how much gross PnL came from short-interest > 10% names?
     - does removing expensive borrow names change the conclusion?
+
+    The caller should pass the same analysis window for step5_df, base_summary
+    and base_positions_250m so the hard-exclusion rows are comparable to the
+    baseline row.
     """
     base_row = base_summary.loc[base_summary["aum"] == aum].iloc[0].to_dict()
     rows = [
@@ -1029,7 +1034,7 @@ def plot_calendar_year_net_returns(
     daily: pd.DataFrame,
     benchmark: pd.Series,
     output_path: Path,
-    strategy_label: str = "250M Elastic Net strategy net",
+    strategy_label: str = "250M Random Forest strategy net",
 ) -> None:
     """Plot calendar-year compounded net returns against SP500_TR."""
     import matplotlib.pyplot as plt
@@ -1170,7 +1175,7 @@ def plot_gross_to_net_decomposition(summary: pd.DataFrame, output_path: Path) ->
     ax.set_xticks(x)
     ax.set_xticklabels(plot_df.index)
     ax.set_ylabel("Annualised return contribution")
-    ax.set_title("Gross-to-Net Return Decomposition")
+    ax.set_title("Diagnostic Gross-to-Net Return Decomposition")
     ax.yaxis.set_major_formatter(lambda value, _: f"{value:.0%}")
     ax.legend(ncol=3, fontsize=8)
     ax.grid(axis="y", alpha=0.25)
@@ -1185,17 +1190,20 @@ def make_quantstats_tearsheet(
     output_path: Path,
     benchmark: pd.Series | None = None,
     title: str = "C2O Step 5 250M Strategy Net Returns vs SP500_TR",
+    end_date: str | None = TRAIN_END,
 ) -> None:
     """Create the required QuantStats HTML report for the 250M portfolio."""
     import quantstats as qs
 
     returns = daily.set_index("date")["net_return"].sort_index()
     returns.index = pd.to_datetime(returns.index)
-    returns = returns[returns.index <= pd.Timestamp(TRAIN_END)]
+    if end_date is not None:
+        returns = returns[returns.index <= pd.Timestamp(end_date)]
     if benchmark is not None:
         benchmark = benchmark.sort_index()
         benchmark.index = pd.to_datetime(benchmark.index)
-        benchmark = benchmark[benchmark.index <= pd.Timestamp(TRAIN_END)]
+        if end_date is not None:
+            benchmark = benchmark[benchmark.index <= pd.Timestamp(end_date)]
     output_path.parent.mkdir(parents=True, exist_ok=True)
     qs.reports.html(
         returns,
