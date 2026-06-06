@@ -94,8 +94,11 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     # market_cap_lag1 is already provided by Step 1-3.
     df["feat_log_mcap_lag1"] = np.log1p(df["market_cap_lag1"])
 
-    # Short-interest / borrow features.
-    # These are shifted again conservatively to make timing easy to defend.
+    # Short-interest and HTB variables are already point-in-time in Step 3:
+    # borrow_filter.py maps FINRA snapshots to daily panel dates using the
+    # availability date, approximately snapshot date + 10 calendar days, and
+    # then enforces availability <= t-1. We apply one additional trading-day
+    # shift here to keep all Step 4 features aligned with the prediction time.
     for col in ["dsi", "dtcn", "ddtcn", "htb_flag"]:
         if col in df.columns:
             df[f"feat_{col}_lag1"] = df.groupby("instrument_id")[col].shift(1)
