@@ -2,8 +2,8 @@ from pathlib import Path
 
 import pandas as pd
 
-from step4_alpha.evaluation import ic_summary
 from step4_alpha.model import expanding_window_random_forest
+from step4_alpha.evaluation import ic_summary
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent
@@ -59,7 +59,7 @@ if __name__ == "__main__":
             "max_depth": 6,
             "min_samples_leaf": 100,
             "max_features": "sqrt",
-        },
+        }
     ]
 
     rows = []
