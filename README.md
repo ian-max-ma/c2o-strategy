@@ -20,6 +20,20 @@ The required Step 5 portfolio outputs are written to `step5_portfolio/output/`.
 The 250M QuantStats tear-sheet is generated as
 `step5_portfolio/output/quantstats_250M_SP500_TR.html`.
 
+Step 5 defaults to report mode, which filters portfolio outputs to the
+development cutoff in `config.py`:
+
+```bash
+python run_step5.py --mode report
+```
+
+If the marker supplies post-2024 scores for held-out evaluation, Step 5 can be
+run without the development-window filter:
+
+```bash
+python run_step5.py --mode heldout
+```
+
 ## Pipeline
 
 - `run_step2.py` rebuilds the Step 1-3 daily panel at `outputs/panel_step3.parquet`.
@@ -29,3 +43,6 @@ The 250M QuantStats tear-sheet is generated as
   6.1 costs, and writes all Step 5 tables, charts, captions and self-checks.
 
 The development cutoff is fixed in `config.py` as `TRAIN_END = "2024-12-31"`.
+The final Step 5 score is fixed in `config.py` as
+`FINAL_SCORE_COL = "score_random_forest"`; other score columns are reported only
+as diagnostics.
