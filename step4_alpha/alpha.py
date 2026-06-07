@@ -1,6 +1,8 @@
 from pathlib import Path
-import pandas as pd
+
 import numpy as np
+import pandas as pd
+
 from step4_alpha.model import build_baseline_score
 
 
@@ -11,6 +13,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 # Step 4 uses the output from Steps 1-3 as its input.
 INPUT_PATH = PROJECT_ROOT / "outputs" / "panel_step3.parquet"
 OUTPUT_PATH = PROJECT_ROOT / "outputs" / "alpha_scores.parquet"
+
 
 def load_step3_panel() -> pd.DataFrame:
     """
@@ -44,8 +47,9 @@ def build_targets(df: pd.DataFrame) -> pd.DataFrame:
     df["target_raw"] = df.groupby("instrument_id")["r_ON"].shift(-1)
 
     # Remove mean from the raw target
-    df["target_raw_demeaned"] = (df["target_raw"]
-                             - df.groupby("date")["target_raw"].transform("mean"))
+    df["target_raw_demeaned"] = (
+        df["target_raw"] - df.groupby("date")["target_raw"].transform("mean")
+    )
 
     # Winsorize the target within each daily cross-section to reduce the impact of extreme moves.
     df["target_winsorized"] = (
@@ -64,6 +68,7 @@ def build_targets(df: pd.DataFrame) -> pd.DataFrame:
     df["target_rank"] = df.groupby("date")["target_raw"].rank(pct=True)
 
     return df
+
 
 def build_features(df: pd.DataFrame) -> pd.DataFrame:
     """
@@ -108,10 +113,12 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     if "feat_htb_flag_lag1" in df.columns:
         df["feat_htb_flag_lag1"] = df["feat_htb_flag_lag1"].astype(float)
 
-
     return df
 
-def standardize_features(df: pd.DataFrame, feature_cols: list[str]) -> tuple[pd.DataFrame, list[str]]:
+
+def standardize_features(
+    df: pd.DataFrame, feature_cols: list[str]
+) -> tuple[pd.DataFrame, list[str]]:
     """
     Cross-sectionally standardize alpha features by date.
 
