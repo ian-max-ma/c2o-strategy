@@ -10,7 +10,92 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 # Step 4 uses the output from Steps 1-3 as its input.
 INPUT_PATH = PROJECT_ROOT / "outputs" / "panel_step3.parquet"
+ALL_DATA_PATH = PROJECT_ROOT / "data" / "all_data.parquet"
+CHEAPNESS_PATH = PROJECT_ROOT / "data" / "cheapness_scores.parquet"
+DOWNGRADE_PATH = PROJECT_ROOT / "data" / "rolling_scores_downgrade.csv"
+UPGRADE_PATH = PROJECT_ROOT / "data" / "rolling_scores_upgrade.csv"
 OUTPUT_PATH = PROJECT_ROOT / "outputs" / "alpha_scores.parquet"
+
+
+# Point-in-time signals selected from all_data. Empty raw market columns are
+# excluded because Step 1 already supplies the usable price-derived features.
+# GICS integer codes are excluded because they are categorical, not ordinal.
+ALL_DATA_FEATURE_COLS = [
+    "piot_norm",
+    "short_interest",
+    "asset_turnover_ratio",
+    "current_liabilities",
+    "ev_to_ebit",
+    "gross_profit_margin",
+    "interest_expenses_net",
+    "long_term_debt",
+    "net_cash_flow_oper",
+    "net_debt_to_equity",
+    "net_income_before_extr",
+    "price_to_book",
+    "total_assets",
+    "total_curr_assets",
+    "epsp",
+    "epsf",
+    "reps1",
+    "repsf4",
+    "sue",
+    "inesp",
+    "inesn",
+    "reps41",
+    "repsfs",
+    "repsfl",
+    "nspc5",
+    "deps",
+    "value_mean_eps",
+    "value_smart_eps",
+    "value_split_adj_mean_eps",
+    "value_split_adj_smart_eps",
+]
+
+CHEAPNESS_FEATURE_COLS = [
+    "valuation_score",
+    "quality_score",
+    "health_score",
+    "momentum_score",
+    "final_score_clean",
+    "score_velocity",
+    "score_acceleration",
+    "regime_break",
+    "value_trap",
+]
+
+# Only forecast probabilities are used. The realised y_true values in these
+# files describe future rating outcomes and must never enter the feature set.
+CREDIT_FEATURE_COLS = [
+    "downgrade_prob_1m",
+    "downgrade_prob_2m",
+    "downgrade_prob_3m",
+    "downgrade_prob_6m",
+    "upgrade_prob_1m",
+    "upgrade_prob_2m",
+    "upgrade_prob_3m",
+    "upgrade_prob_6m",
+]
+
+PANEL_COLS = [
+    "date",
+    "ticker",
+    "instrument_id",
+    "r_ON",
+    "r_CC_lag1",
+    "r_ID_lag1",
+    "market_cap_lag1",
+    "vol20",
+    "adv20",
+    "eligible",
+    "dsi",
+    "dtcn",
+    "ddtcn",
+    "htb_tier",
+    "htb_flag",
+]
+
 
 def load_step3_panel() -> pd.DataFrame:
     """
@@ -22,7 +107,106 @@ def load_step3_panel() -> pd.DataFrame:
     - universe filters: in_universe, eligible
     - borrow variables: dsi, dtcn, htb_tier, htb_flag
     """
-    return pd.read_parquet(INPUT_PATH)
+    return pd.read_parquet(INPUT_PATH, columns=PANEL_COLS)
+
+
+def add_all_data_features(df: pd.DataFrame) -> pd.DataFrame:
+    """Merge one-day-lagged all_data signals onto eligible stock-days."""
+    all_data = pd.read_parquet(
+        ALL_DATA_PATH,
+        columns=["stock_id", "date"] + ALL_DATA_FEATURE_COLS,
+    ).rename(columns={"stock_id": "instrument_id"})
+    all_data["date"] = pd.to_datetime(all_data["date"])
+    all_data = all_data.sort_values(["instrument_id", "date"])
+
+    lagged = all_data.groupby("instrument_id")[ALL_DATA_FEATURE_COLS].shift(1)
+    lagged.columns = [f"feat_{col}_lag1" for col in ALL_DATA_FEATURE_COLS]
+    all_data = pd.concat(
+        [all_data[["instrument_id", "date"]].reset_index(drop=True),
+         lagged.reset_index(drop=True)],
+        axis=1,
+    )
+
+    return df.merge(
+        all_data,
+        on=["instrument_id", "date"],
+        how="left",
+        validate="many_to_one",
+    )
+
+
+def add_cheapness_features(df: pd.DataFrame) -> pd.DataFrame:
+    """Merge one-day-lagged valuation, quality and momentum scores."""
+    cheapness = pd.read_parquet(
+        CHEAPNESS_PATH,
+        columns=["instrument_id", "date", "ticker"] + CHEAPNESS_FEATURE_COLS,
+    )
+    cheapness["date"] = pd.to_datetime(cheapness["date"])
+    cheapness["value_trap"] = cheapness["value_trap"].astype(float)
+    cheapness = cheapness.sort_values(["instrument_id", "ticker", "date"])
+
+    lagged = cheapness.groupby(
+        ["instrument_id", "ticker"]
+    )[CHEAPNESS_FEATURE_COLS].shift(1)
+    lagged.columns = [f"feat_{col}_lag1" for col in CHEAPNESS_FEATURE_COLS]
+    cheapness = pd.concat(
+        [cheapness[["instrument_id", "date", "ticker"]].reset_index(drop=True),
+         lagged.reset_index(drop=True)],
+        axis=1,
+    )
+
+    return df.merge(
+        cheapness,
+        on=["instrument_id", "date", "ticker"],
+        how="left",
+        validate="one_to_one",
+    )
+
+
+def _load_credit_probabilities(path: Path, prefix: str) -> pd.DataFrame:
+    """Pivot the four rating forecast horizons to one row per ticker-date."""
+    scores = pd.read_csv(path, usecols=["ticker", "date", "target", "prob"])
+    scores["date"] = pd.to_datetime(scores["date"])
+    scores["horizon"] = scores["target"].str.extract(r"_(1m|2m|3m|6m)$")
+
+    scores = (
+        scores.pivot(index=["ticker", "date"], columns="horizon", values="prob")
+        .rename(columns=lambda horizon: f"{prefix}_prob_{horizon}")
+        .reset_index()
+    )
+    scores.columns.name = None
+    return scores
+
+
+def add_credit_features(df: pd.DataFrame) -> pd.DataFrame:
+    """As-of merge the latest credit forecasts known before each stock-day."""
+    downgrade = _load_credit_probabilities(DOWNGRADE_PATH, "downgrade")
+    upgrade = _load_credit_probabilities(UPGRADE_PATH, "upgrade")
+    credit = downgrade.merge(
+        upgrade,
+        on=["ticker", "date"],
+        how="outer",
+        validate="one_to_one",
+    )
+    credit = credit.rename(columns={"date": "credit_date"})
+    credit["credit_date"] = credit["credit_date"] + pd.Timedelta(days=1)
+    credit["credit_date"] = credit["credit_date"].astype("datetime64[ns]")
+    credit = credit.sort_values("credit_date")
+
+    left = df.reset_index(names="_row_order").sort_values("date")
+    merged = pd.merge_asof(
+        left,
+        credit,
+        left_on="date",
+        right_on="credit_date",
+        by="ticker",
+        direction="backward",
+    )
+    merged = merged.drop(columns=["credit_date"]).sort_values("_row_order")
+    merged = merged.drop(columns=["_row_order"]).reset_index(drop=True)
+    return merged.rename(
+        columns={col: f"feat_{col}_lag1" for col in CREDIT_FEATURE_COLS}
+    )
 
 
 def build_targets(df: pd.DataFrame) -> pd.DataFrame:
@@ -76,8 +260,12 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     """
     df = df.sort_values(["instrument_id", "date"]).copy()
 
-    # Return reversal / momentum features.
-    # These are already lagged by the Step 1-3 pipeline, so they are safe to use.
+    # Today's overnight return uses Open_t and Close_{t-1}, so it is already
+    # observable at the 15:50 decision time and does not require a lag.
+    df["feat_r_on_today"] = df["r_ON"]
+
+    # Intraday and close-to-close returns use Close_t and therefore enter via
+    # the feature-safe lagged columns created by the Step 1-3 pipeline.
     df["feat_r_cc_lag1"] = df["r_CC_lag1"]
     df["feat_r_id_lag1"] = df["r_ID_lag1"]
 
@@ -94,16 +282,11 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     # market_cap_lag1 is already provided by Step 1-3.
     df["feat_log_mcap_lag1"] = np.log1p(df["market_cap_lag1"])
 
-<<<<<<< HEAD
-    # Short-interest / borrow features.
-    # These are shifted again conservatively to make timing easy to defend.
-=======
     # Short-interest and HTB variables are already point-in-time in Step 3:
     # borrow_filter.py maps FINRA snapshots to daily panel dates using the
     # availability date, approximately snapshot date + 10 calendar days, and
     # then enforces availability <= t-1. We apply one additional trading-day
     # shift here to keep all Step 4 features aligned with the prediction time.
->>>>>>> origin/main
     for col in ["dsi", "dtcn", "ddtcn", "htb_flag"]:
         if col in df.columns:
             df[f"feat_{col}_lag1"] = df.groupby("instrument_id")[col].shift(1)
@@ -115,6 +298,7 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
 
 
     return df
+
 
 def standardize_features(df: pd.DataFrame, feature_cols: list[str]) -> tuple[pd.DataFrame, list[str]]:
     """
@@ -130,21 +314,17 @@ def standardize_features(df: pd.DataFrame, feature_cols: list[str]) -> tuple[pd.
     neutral cross-sectional feature value.
     """
     df = df.copy()
-    z_cols = []
+    z_cols = [f"z_{col}" for col in feature_cols]
 
-    for col in feature_cols:
-        z_col = f"z_{col}"
+    feature_values = df[feature_cols].astype("float32")
+    grouped = feature_values.groupby(df["date"])
+    daily_mean = grouped.transform("mean")
+    daily_std = grouped.transform("std")
 
-        daily_mean = df.groupby("date")[col].transform("mean")
-        daily_std = df.groupby("date")[col].transform("std")
-
-        df[z_col] = (df[col] - daily_mean) / daily_std
-
-        # Clean numerical issues from zero daily standard deviation or missing inputs.
-        df[z_col] = df[z_col].replace([np.inf, -np.inf], np.nan)
-        df[z_col] = df[z_col].fillna(0.0)
-
-        z_cols.append(z_col)
+    standardized = (feature_values - daily_mean) / daily_std
+    standardized = standardized.replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    standardized.columns = z_cols
+    df[z_cols] = standardized.astype("float32")
 
     return df, z_cols
 
@@ -159,13 +339,37 @@ def build_alpha_dataset() -> tuple[pd.DataFrame, list[str]]:
     """
     df = load_step3_panel()
 
-    # Step 4 alpha is constructed only on tradable stock-days.
-    df = df[df["eligible"]].copy()
-
+    # Build price-derived shifts on complete trading histories. External
+    # sources are pre-lagged in their own tables before the eligible-row merge.
     df = build_targets(df)
     df = build_features(df)
 
+    # External feature merges and cross-sectional standardization only need
+    # tradable stock-days, reducing peak memory substantially.
+    df = df[df["eligible"]].copy()
+    df = add_all_data_features(df)
+    df = add_cheapness_features(df)
+    df = add_credit_features(df)
+
+    # Recompute cross-sectional target transforms on the actual tradable
+    # universe. target_raw itself was shifted before filtering so it still
+    # represents the next trading observation.
+    df["target_raw_demeaned"] = (
+        df["target_raw"]
+        - df.groupby("date")["target_raw"].transform("mean")
+    )
+    df["target_winsorized"] = (
+        df.groupby("date")["target_raw"]
+        .transform(lambda x: x.clip(x.quantile(0.01), x.quantile(0.99)))
+    )
+    df["target_winsorized_demeaned"] = (
+        df["target_winsorized"]
+        - df.groupby("date")["target_winsorized"].transform("mean")
+    )
+    df["target_rank"] = df.groupby("date")["target_raw"].rank(pct=True)
+
     feature_cols = [
+        "feat_r_on_today",
         "feat_r_cc_lag1",
         "feat_r_id_lag1",
         "feat_vol20_lag1",
@@ -175,10 +379,31 @@ def build_alpha_dataset() -> tuple[pd.DataFrame, list[str]]:
         "feat_dtcn_lag1",
         "feat_ddtcn_lag1",
         "feat_htb_flag_lag1",
+    ] + [
+        f"feat_{col}_lag1"
+        for col in (
+            ALL_DATA_FEATURE_COLS
+            + CHEAPNESS_FEATURE_COLS
+            + CREDIT_FEATURE_COLS
+        )
     ]
     feature_cols = [col for col in feature_cols if col in df.columns]
 
     df, z_cols = standardize_features(df, feature_cols)
+
+    # Model training and downstream evaluation only need this compact surface.
+    # Dropping raw/intermediate features here leaves memory headroom for fits.
+    keep_cols = [
+        "date",
+        "ticker",
+        "instrument_id",
+        "target_raw",
+        "target_winsorized_demeaned",
+        "target_rank",
+        "htb_tier",
+        "htb_flag",
+    ] + z_cols
+    df = df[keep_cols]
     df = build_baseline_score(df)
 
     return df, z_cols

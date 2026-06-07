@@ -5,9 +5,8 @@ Usage:
     python run_all.py
 
 The default run rebuilds the report sanity outputs, the Step 1-3 panel, Step 4
-alpha scores and Step 5 portfolio outputs. Random-forest hyperparameter tuning
-is intentionally optional because it is an exploratory model-selection audit,
-not a required production artifact.
+alpha scores and Step 5 portfolio outputs. Feature ablation and model tuning
+are optional because they are exploratory model-selection audits.
 """
 
 from __future__ import annotations
@@ -45,7 +44,7 @@ def main() -> None:
     parser.add_argument(
         "--include-tuning",
         action="store_true",
-        help="Also run the optional Random Forest tuning audit.",
+        help="Also run Step 4 feature ablation and model-tuning audits.",
     )
     args = parser.parse_args()
 
@@ -72,7 +71,14 @@ def main() -> None:
         ]
     )
     if args.include_tuning:
-        scripts.append("run_step4_random_forest_tuning.py")
+        scripts.extend(
+            [
+                "run_step4_ablation.py",
+                "run_step4_elastic_net_tuning.py",
+                "run_step4_random_forest_tuning.py",
+                "run_step4_tuning_holdout.py",
+            ]
+        )
     scripts.append("run_step5.py")
 
     for script in scripts:

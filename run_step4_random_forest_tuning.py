@@ -3,7 +3,7 @@ from pathlib import Path
 import pandas as pd
 
 from step4_alpha.model import expanding_window_random_forest
-from step4_alpha.evaluation import ic_summary
+from step4_alpha.evaluation import decile_spread_summary, ic_summary
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent
@@ -11,6 +11,10 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 INPUT_PATH = PROJECT_ROOT / "outputs" / "alpha_scores.parquet"
 OUTPUT_DIR = PROJECT_ROOT / "step4_alpha" / "eval_output"
 OUTPUT_PATH = OUTPUT_DIR / "random_forest_tuning.csv"
+
+VALIDATION_FIRST_YEAR = 2021
+VALIDATION_LAST_YEAR = 2023
+MAX_TRAIN_ROWS = 500_000
 
 
 if __name__ == "__main__":
@@ -33,36 +37,47 @@ if __name__ == "__main__":
             "max_features": "sqrt",
         },
         {
-            "variant": "rf_depth6_leaf300",
-            "n_estimators": 200,
-            "max_depth": 6,
-            "min_samples_leaf": 300,
-            "max_features": "sqrt",
-        },
-        {
-            "variant": "rf_depth8_leaf500",
-            "n_estimators": 200,
-            "max_depth": 8,
+            "variant": "rf_depth3_leaf500",
+            "n_estimators": 100,
+            "max_depth": 3,
             "min_samples_leaf": 500,
             "max_features": "sqrt",
         },
         {
-            "variant": "rf_depth6_leaf1000",
-            "n_estimators": 200,
-            "max_depth": 6,
+            "variant": "rf_depth7_leaf500",
+            "n_estimators": 100,
+            "max_depth": 7,
+            "min_samples_leaf": 500,
+            "max_features": "sqrt",
+        },
+        {
+            "variant": "rf_depth5_leaf200",
+            "n_estimators": 100,
+            "max_depth": 5,
+            "min_samples_leaf": 200,
+            "max_features": "sqrt",
+        },
+        {
+            "variant": "rf_depth5_leaf1000",
+            "n_estimators": 100,
+            "max_depth": 5,
             "min_samples_leaf": 1000,
             "max_features": "sqrt",
         },
-<<<<<<< HEAD
-=======
         {
-            "variant": "rf_depth6_leaf100",
+            "variant": "rf_depth5_leaf500_mf05",
+            "n_estimators": 100,
+            "max_depth": 5,
+            "min_samples_leaf": 500,
+            "max_features": 0.5,
+        },
+        {
+            "variant": "rf_depth5_leaf500_trees200",
             "n_estimators": 200,
-            "max_depth": 6,
-            "min_samples_leaf": 100,
+            "max_depth": 5,
+            "min_samples_leaf": 500,
             "max_features": "sqrt",
-        }
->>>>>>> origin/main
+        },
     ]
 
     rows = []
@@ -74,15 +89,16 @@ if __name__ == "__main__":
         print(params)
 
         df_pred = expanding_window_random_forest(
-            df=df.copy(),
+            df=df,
             feature_cols=feature_cols,
             target_col="target_winsorized_demeaned",
-            first_pred_year=2018,
-            last_pred_year=2024,
+            first_pred_year=VALIDATION_FIRST_YEAR,
+            last_pred_year=VALIDATION_LAST_YEAR,
             n_estimators=params["n_estimators"],
             max_depth=params["max_depth"],
             min_samples_leaf=params["min_samples_leaf"],
             max_features=params["max_features"],
+            max_train_rows=MAX_TRAIN_ROWS,
         )
 
         score_col = "score_random_forest"
@@ -95,12 +111,24 @@ if __name__ == "__main__":
         )
 
         row = ic.iloc[0].to_dict()
+        deciles = decile_spread_summary(
+            df_model,
+            score_col=score_col,
+            target_col="target_winsorized_demeaned",
+        )
 
         row["variant"] = variant
         row["n_estimators"] = params["n_estimators"]
         row["max_depth"] = params["max_depth"]
         row["min_samples_leaf"] = params["min_samples_leaf"]
         row["max_features"] = params["max_features"]
+        row["validation_years"] = (
+            f"{VALIDATION_FIRST_YEAR}-{VALIDATION_LAST_YEAR}"
+        )
+        row["max_train_rows"] = MAX_TRAIN_ROWS
+        row["top_bottom_spread"] = deciles.loc[
+            deciles["decile"] == "top_minus_bottom", "mean"
+        ].iloc[0]
 
         rows.append(row)
 
@@ -113,10 +141,13 @@ if __name__ == "__main__":
             "max_depth",
             "min_samples_leaf",
             "max_features",
+            "validation_years",
+            "max_train_rows",
             "mean_ic",
             "std_ic",
             "t_stat",
             "n_days",
+            "top_bottom_spread",
         ]
     ].sort_values("mean_ic", ascending=False)
 

@@ -33,18 +33,19 @@ if __name__ == "__main__":
     print(f"Saved baseline alpha scores to: {BASELINE_OUTPUT_PATH}")
     print("Baseline output shape:", df[output_cols].shape)
 
-    # Elastic Net uses the same standardized features as the baseline.
+    # Elastic Net uses the standardized feature set returned by alpha.py.
     df_ml = expanding_window_elastic_net(
         df=df[output_cols].copy(),
         feature_cols=z_cols,
         target_col="target_winsorized_demeaned",
         first_pred_year=2018,
         last_pred_year=2024,
-        alpha=0.00001,
+        alpha=0.000001,
         l1_ratio=0.5,
     )
 
-    # Random Forest uses the same standardized features and target.
+    # Random Forest uses the same features and a deterministic training-row cap
+    # to keep each expanding-window fit practical on a multi-million-row panel.
     df_ml = expanding_window_random_forest(
         df=df_ml,
         feature_cols=z_cols,
@@ -55,6 +56,7 @@ if __name__ == "__main__":
         max_depth=5,
         min_samples_leaf=500,
         max_features="sqrt",
+        max_train_rows=750_000,
     )
 
     df_ml.to_parquet(ML_OUTPUT_PATH, index=False)

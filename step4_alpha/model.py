@@ -2,8 +2,6 @@ import pandas as pd
 import numpy as np
 
 from sklearn.linear_model import ElasticNet
-from sklearn.preprocessing import StandardScaler
-from sklearn.pipeline import make_pipeline
 from sklearn.ensemble import RandomForestRegressor
 
 
@@ -44,32 +42,35 @@ def fit_predict_elastic_net(
     alpha: float = 0.0001,
     l1_ratio: float = 0.5,
     random_state: int = 42,
+    max_train_rows: int | None = None,
 ) -> pd.Series:
     """
     Fit Elastic Net on the training sample and predict scores for the test sample.
 
     The input features are already cross-sectionally standardized by date.
-    A StandardScaler is still included in the pipeline to stabilise the model
-    over the pooled training window.
     """
-    train = train_df.dropna(subset=feature_cols + [target_col]).copy()
-    test = test_df.dropna(subset=feature_cols).copy()
+    train = train_df.dropna(subset=[target_col])
+    test = test_df
 
-    model = make_pipeline(
-        StandardScaler(),
-        ElasticNet(
-            alpha=alpha,
-            l1_ratio=l1_ratio,
-            fit_intercept=True,
-            max_iter=5000,
-            random_state=random_state,
-        ),
+    if max_train_rows is not None and len(train) > max_train_rows:
+        train = train.sample(n=max_train_rows, random_state=random_state)
+
+    x_train = train[feature_cols].to_numpy(dtype=np.float32, copy=False)
+    y_train = train[target_col].to_numpy(dtype=np.float32, copy=False)
+    x_test = test[feature_cols].to_numpy(dtype=np.float32, copy=False)
+
+    model = ElasticNet(
+        alpha=alpha,
+        l1_ratio=l1_ratio,
+        fit_intercept=True,
+        max_iter=5000,
+        random_state=random_state,
     )
 
-    model.fit(train[feature_cols], train[target_col])
+    model.fit(x_train, y_train)
 
     pred = pd.Series(
-        model.predict(test[feature_cols]),
+        model.predict(x_test),
         index=test.index,
         name="score_elastic_net",
     )
@@ -85,6 +86,7 @@ def expanding_window_elastic_net(
     last_pred_year: int = 2024,
     alpha: float = 0.0001,
     l1_ratio: float = 0.5,
+    max_train_rows: int | None = None,
 ) -> pd.DataFrame:
     """
     Generate out-of-sample Elastic Net scores using an expanding-window scheme.
@@ -109,7 +111,9 @@ def expanding_window_elastic_net(
         print(
             f"[Elastic Net] Train <= {pred_year - 1}, "
             f"predict {pred_year}: "
-            f"{len(train_df):,} train rows, {len(test_df):,} test rows"
+            f"{len(train_df):,} available train rows, "
+            f"up to {max_train_rows or len(train_df):,} used, "
+            f"{len(test_df):,} test rows"
         )
 
         pred = fit_predict_elastic_net(
@@ -119,6 +123,7 @@ def expanding_window_elastic_net(
             target_col=target_col,
             alpha=alpha,
             l1_ratio=l1_ratio,
+            max_train_rows=max_train_rows,
         )
 
         df.loc[pred.index, "score_elastic_net"] = pred
@@ -136,8 +141,9 @@ def fit_predict_random_forest(
     n_estimators: int = 100,
     max_depth: int = 5,
     min_samples_leaf: int = 500,
-    max_features: str = "sqrt",
+    max_features: str | float = "sqrt",
     random_state: int = 42,
+    max_train_rows: int | None = 750_000,
 ) -> pd.Series:
     """
     Fit Random Forest on the training sample and predict scores for the test sample.
@@ -146,8 +152,15 @@ def fit_predict_random_forest(
     Conservative tree depth and large leaf size are used to reduce overfitting
     on noisy daily stock-return data.
     """
-    train = train_df.dropna(subset=feature_cols + [target_col]).copy()
-    test = test_df.dropna(subset=feature_cols).copy()
+    train = train_df.dropna(subset=[target_col])
+    test = test_df
+
+    if max_train_rows is not None and len(train) > max_train_rows:
+        train = train.sample(n=max_train_rows, random_state=random_state)
+
+    x_train = train[feature_cols].to_numpy(dtype=np.float32, copy=False)
+    y_train = train[target_col].to_numpy(dtype=np.float32, copy=False)
+    x_test = test[feature_cols].to_numpy(dtype=np.float32, copy=False)
 
     model = RandomForestRegressor(
         n_estimators=n_estimators,
@@ -158,10 +171,10 @@ def fit_predict_random_forest(
         n_jobs=-1,
     )
 
-    model.fit(train[feature_cols], train[target_col])
+    model.fit(x_train, y_train)
 
     pred = pd.Series(
-        model.predict(test[feature_cols]),
+        model.predict(x_test),
         index=test.index,
         name="score_random_forest",
     )
@@ -178,7 +191,8 @@ def expanding_window_random_forest(
     n_estimators: int = 100,
     max_depth: int = 5,
     min_samples_leaf: int = 500,
-    max_features: str = "sqrt",
+    max_features: str | float = "sqrt",
+    max_train_rows: int | None = 750_000,
 ) -> pd.DataFrame:
     """
     Generate out-of-sample Random Forest scores using an expanding-window scheme.
@@ -203,7 +217,9 @@ def expanding_window_random_forest(
         print(
             f"[Random Forest] Train <= {pred_year - 1}, "
             f"predict {pred_year}: "
-            f"{len(train_df):,} train rows, {len(test_df):,} test rows"
+            f"{len(train_df):,} available train rows, "
+            f"up to {max_train_rows or len(train_df):,} used, "
+            f"{len(test_df):,} test rows"
         )
 
         pred = fit_predict_random_forest(
@@ -215,14 +231,11 @@ def expanding_window_random_forest(
             max_depth=max_depth,
             min_samples_leaf=min_samples_leaf,
             max_features=max_features,
+            max_train_rows=max_train_rows,
         )
 
         df.loc[pred.index, "score_random_forest"] = pred
 
     df = df.drop(columns=["year"])
 
-<<<<<<< HEAD
     return df
-=======
-    return df
->>>>>>> origin/main

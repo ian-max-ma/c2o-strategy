@@ -9,16 +9,15 @@ from step4_alpha.evaluation import (
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 INPUT_PATH = PROJECT_ROOT / "outputs" / "alpha_scores_ml.parquet"
-<<<<<<< HEAD
-=======
 BASELINE_INPUT_PATH = PROJECT_ROOT / "outputs" / "alpha_scores.parquet"
 
 OUTPUT_DIR = PROJECT_ROOT / "step4_alpha" / "eval_output"
 OUTPUT_PATH = OUTPUT_DIR / "ic_summary_ml.csv"
 BASELINE_FULL_IC_PATH = OUTPUT_DIR / "ic_baseline_full_sample.csv"
+BASELINE_FULL_DECILE_PATH = OUTPUT_DIR / "decile_spread_baseline_full_sample.csv"
+BASELINE_FULL_DECILE_PLOT_PATH = OUTPUT_DIR / "decile_spread_baseline_full_sample.png"
 
 IC_PLOT_PATH = OUTPUT_DIR / "ic_summary_ml.png"
->>>>>>> origin/main
 
 if not INPUT_PATH.exists():
     raise FileNotFoundError(
@@ -26,15 +25,6 @@ if not INPUT_PATH.exists():
         "Please run `python3 run_step4.py` first."
     )
 
-<<<<<<< HEAD
-OUTPUT_DIR = PROJECT_ROOT / "step4_alpha" / "eval_output"
-OUTPUT_PATH = OUTPUT_DIR / "ic_summary_ml.csv"
-
-IC_PLOT_PATH = OUTPUT_DIR / "ic_summary_ml.png"
-
-
-=======
->>>>>>> origin/main
 if __name__ == "__main__":
 
     df = pd.read_parquet(INPUT_PATH)
@@ -45,15 +35,17 @@ if __name__ == "__main__":
         if col in df.columns:
             score_cols.append(col)
 
+    # Use the common OOS window for the headline comparison. Each individual
+    # decile diagnostic below uses only the non-null sample for its own score.
     model_score_cols = [
         col for col in ["score_elastic_net", "score_random_forest"]
         if col in df.columns
     ]
-
-    if model_score_cols:
-        df_model = df.dropna(subset=model_score_cols).copy()
-    else:
-        df_model = df.copy()
+    df_model = (
+        df.dropna(subset=model_score_cols).copy()
+        if model_score_cols
+        else df.copy()
+    )
 
     print(f"Evaluation sample rows: {len(df_model):,}")
     print(f"Evaluation date range: {df_model['date'].min()} → {df_model['date'].max()}")
@@ -66,8 +58,6 @@ if __name__ == "__main__":
     print(f"Saved IC summary to: {OUTPUT_PATH}")
     print(ic.to_string(index=False))
 
-<<<<<<< HEAD
-=======
     # Full-sample baseline diagnostic.
     # This uses the baseline-only alpha file, so it is not restricted to the
     # 2018-2024 OOS period where ML predictions are available.
@@ -84,13 +74,27 @@ if __name__ == "__main__":
 
         print(f"\nSaved full-sample baseline IC to: {BASELINE_FULL_IC_PATH}")
         print(ic_baseline_full.to_string(index=False))
+
+        decile_baseline_full = decile_spread_summary(
+            df_baseline_full,
+            score_col="score_baseline",
+        )
+        decile_baseline_full.to_csv(BASELINE_FULL_DECILE_PATH, index=False)
+        plot_decile_spread(
+            decile_baseline_full,
+            BASELINE_FULL_DECILE_PLOT_PATH,
+            title="Baseline Score Decile Spread (2010-2024)",
+        )
+        print(
+            "Saved full-sample baseline decile spread to: "
+            f"{BASELINE_FULL_DECILE_PATH}"
+        )
     else:
         print(
             "\nSkipping full-sample baseline IC: "
             "outputs/alpha_scores.parquet not found."
         )
 
->>>>>>> origin/main
     # decile spread check
 
     DECILE_BASELINE_OUTPUT_PATH = OUTPUT_DIR / "decile_spread_baseline.csv"
@@ -103,7 +107,12 @@ if __name__ == "__main__":
     DECILE_RANDOM_FOREST_PLOT_PATH = OUTPUT_DIR / "decile_spread_random_forest.png"
 
 
-    decile_baseline = decile_spread_summary(df_model, score_col="score_baseline")
+    # This baseline file intentionally uses the ML OOS window for a like-for-like
+    # comparison with Elastic Net and Random Forest.
+    decile_baseline = decile_spread_summary(
+        df_model.dropna(subset=["score_baseline"]),
+        score_col="score_baseline",
+    )
     decile_baseline.to_csv(DECILE_BASELINE_OUTPUT_PATH, index=False)
 
     plot_decile_spread(
@@ -115,8 +124,12 @@ if __name__ == "__main__":
     print(f"\nSaved baseline decile spread to: {DECILE_BASELINE_OUTPUT_PATH}")
     print(decile_baseline.to_string(index=False))
 
-    if "score_elastic_net" in df_model.columns:
-        decile_elastic_net = decile_spread_summary(df_model, score_col="score_elastic_net")
+    if "score_elastic_net" in df.columns:
+        df_elastic_net = df.dropna(subset=["score_elastic_net"])
+        decile_elastic_net = decile_spread_summary(
+            df_elastic_net,
+            score_col="score_elastic_net",
+        )
         decile_elastic_net.to_csv(DECILE_ELASTIC_NET_OUTPUT_PATH, index=False)
 
         plot_decile_spread(
@@ -128,8 +141,12 @@ if __name__ == "__main__":
         print(f"\nSaved Elastic Net decile spread to: {DECILE_ELASTIC_NET_OUTPUT_PATH}")
         print(decile_elastic_net.to_string(index=False))
 
-    if "score_random_forest" in df_model.columns:
-        decile_random_forest = decile_spread_summary(df_model, score_col="score_random_forest")
+    if "score_random_forest" in df.columns:
+        df_random_forest = df.dropna(subset=["score_random_forest"])
+        decile_random_forest = decile_spread_summary(
+            df_random_forest,
+            score_col="score_random_forest",
+        )
         decile_random_forest.to_csv(DECILE_RANDOM_FOREST_OUTPUT_PATH, index=False)
 
         plot_decile_spread(

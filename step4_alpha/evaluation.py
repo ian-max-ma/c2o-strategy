@@ -8,18 +8,24 @@ def daily_spearman_ic(
     df: pd.DataFrame,
     score_col: str,
     target_col: str = "target_winsorized_demeaned",
-    ) -> pd.Series:
+) -> pd.Series:
     """
     Compute daily cross-sectional Spearman IC.
 
     IC measures whether stocks with higher scores on date t have higher
     realized next overnight returns.
     """
-    return (
-        df.groupby("date")
-        .apply(lambda x: x[score_col].corr(x[target_col], method="spearman"))
-        .dropna()
-    )
+    def valid_daily_ic(group: pd.DataFrame) -> float:
+        pair = group[[score_col, target_col]].dropna()
+        if (
+            len(pair) < 3
+            or pair[score_col].nunique() < 2
+            or pair[target_col].nunique() < 2
+        ):
+            return np.nan
+        return pair[score_col].corr(pair[target_col], method="spearman")
+
+    return df.groupby("date", sort=False).apply(valid_daily_ic).dropna()
 
 
 def ic_summary(
@@ -119,22 +125,46 @@ def plot_ic_summary(
     ic_df: pd.DataFrame,
     output_path: str | Path,
     title: str = "Mean Daily Spearman IC",
+    n_top_features: int = 10,
 ) -> None:
     """
-    Plot mean IC for each score / feature.
-    """
-    plot_df = ic_df.copy()
+    Plot model ICs and the strongest individual feature ICs.
 
-    plt.figure(figsize=(10, 6))
-    plt.barh(plot_df["score_col"], plot_df["mean_ic"])
+    All model scores are retained. Individual features are ranked by absolute
+    mean IC so both strong positive and strong negative predictors are shown.
+    The complete set remains available in the CSV summary.
+    """
+    model_names = {
+        "score_baseline",
+        "score_elastic_net",
+        "score_random_forest",
+    }
+    model_rows = ic_df[ic_df["score_col"].isin(model_names)]
+    feature_rows = (
+        ic_df[~ic_df["score_col"].isin(model_names)]
+        .assign(abs_mean_ic=lambda x: x["mean_ic"].abs())
+        .nlargest(n_top_features, "abs_mean_ic")
+        .drop(columns="abs_mean_ic")
+    )
+    plot_df = pd.concat([model_rows, feature_rows], ignore_index=True)
+    plot_df = plot_df.sort_values("mean_ic")
+    plot_df["label"] = (
+        plot_df["score_col"]
+        .str.removeprefix("z_feat_")
+        .str.removesuffix("_lag1")
+        .str.replace("_", " ")
+    )
+
+    plt.figure(figsize=(10, 7))
+    colors = [
+        "tab:blue" if name in model_names else "tab:gray"
+        for name in plot_df["score_col"]
+    ]
+    plt.barh(plot_df["label"], plot_df["mean_ic"], color=colors)
     plt.axvline(0.0, linewidth=1)
     plt.xlabel("Mean IC")
-    plt.ylabel("Score / feature")
+    plt.ylabel("Model / selected feature")
     plt.title(title)
     plt.tight_layout()
     plt.savefig(output_path, dpi=200)
-<<<<<<< HEAD
     plt.close()
-=======
-    plt.close()
->>>>>>> origin/main
