@@ -3,6 +3,21 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from pathlib import Path
 
+from config import (
+    BORROW_TIER_A_BPS,
+    BORROW_TIER_B_BPS,
+    BORROW_TIER_C_BPS,
+    ROUNDTRIP_BPS,
+    TRADING_DAYS,
+)
+
+
+BORROW_BPS_BY_TIER = {
+    "A": BORROW_TIER_A_BPS,
+    "B": BORROW_TIER_B_BPS,
+    "C": BORROW_TIER_C_BPS,
+}
+
 
 def daily_spearman_ic(
     df: pd.DataFrame,
@@ -94,6 +109,155 @@ def decile_spread_summary(
     })
 
     return pd.concat([decile_table, spread_row], ignore_index=True)
+
+
+def daily_score_spread(
+    df: pd.DataFrame,
+    score_col: str,
+    target_col: str = "target_raw",
+    n_bins: int = 10,
+) -> pd.DataFrame:
+    """Return the daily equal-weight top-minus-bottom score-decile spread."""
+    required = {"date", score_col, target_col}
+    missing = required - set(df.columns)
+    if missing:
+        raise KeyError(f"Missing columns for daily spread: {sorted(missing)}")
+    if n_bins < 2:
+        raise ValueError("n_bins must be at least 2.")
+
+    rows = []
+    data = df[["date", score_col, target_col]].dropna()
+    for date, day in data.groupby("date", sort=True):
+        if len(day) < n_bins or day[score_col].nunique() < 2:
+            continue
+
+        ranked = day.sort_values(score_col, kind="mergesort")
+        n_side = max(1, len(ranked) // n_bins)
+        bottom = ranked.head(n_side)[target_col]
+        top = ranked.tail(n_side)[target_col]
+        bottom_mean = float(bottom.mean())
+        top_mean = float(top.mean())
+        rows.append(
+            {
+                "date": date,
+                "bottom_mean": bottom_mean,
+                "top_mean": top_mean,
+                "top_minus_bottom": top_mean - bottom_mean,
+                "n_bottom": int(len(bottom)),
+                "n_top": int(len(top)),
+            }
+        )
+
+    return pd.DataFrame(
+        rows,
+        columns=[
+            "date",
+            "bottom_mean",
+            "top_mean",
+            "top_minus_bottom",
+            "n_bottom",
+            "n_top",
+        ],
+    )
+
+
+def cost_aware_decile_summary(
+    df: pd.DataFrame,
+    score_col: str,
+    target_col: str = "target_raw",
+    tier_col: str = "htb_tier",
+    n_bins: int = 10,
+    roundtrip_bps: float = ROUNDTRIP_BPS,
+) -> pd.DataFrame:
+    """
+    Summarise a fully invested dollar-neutral top/bottom decile portfolio.
+
+    Each side receives 50% notional. Trading cost is charged at the fixed
+    full-gross overnight round-trip rate, while borrow is charged only against
+    the short half using the average tier rate of bottom-decile names.
+    """
+    required = {"date", score_col, target_col}
+    missing = required - set(df.columns)
+    if missing:
+        raise KeyError(f"Missing columns for cost-aware spread: {sorted(missing)}")
+    if n_bins < 2:
+        raise ValueError("n_bins must be at least 2.")
+
+    columns = ["date", score_col, target_col]
+    if tier_col in df.columns:
+        columns.append(tier_col)
+    data = df[columns].dropna(subset=["date", score_col, target_col]).copy()
+    if tier_col not in data.columns:
+        data[tier_col] = "A"
+    data[tier_col] = data[tier_col].fillna("A")
+
+    daily_rows = []
+    for date, day in data.groupby("date", sort=True):
+        if len(day) < n_bins or day[score_col].nunique() < 2:
+            continue
+
+        ranked = day.sort_values(score_col, kind="mergesort")
+        n_side = max(1, len(ranked) // n_bins)
+        bottom = ranked.head(n_side)
+        top = ranked.tail(n_side)
+
+        top_mean = float(top[target_col].mean())
+        bottom_mean = float(bottom[target_col].mean())
+        gross_return = 0.5 * (top_mean - bottom_mean)
+        trading_cost = roundtrip_bps / 10_000
+        short_borrow_bps = (
+            bottom[tier_col]
+            .map(BORROW_BPS_BY_TIER)
+            .fillna(BORROW_TIER_A_BPS)
+            .mean()
+        )
+        borrow_cost = 0.5 * short_borrow_bps / 10_000 / TRADING_DAYS
+
+        daily_rows.append(
+            {
+                "gross_return": gross_return,
+                "trading_cost_return": trading_cost,
+                "borrow_cost_return": borrow_cost,
+                "net_return": gross_return - trading_cost - borrow_cost,
+            }
+        )
+
+    daily = pd.DataFrame(daily_rows)
+    if daily.empty:
+        return pd.DataFrame()
+
+    gross_std = daily["gross_return"].std()
+    net_std = daily["net_return"].std()
+    gross_sharpe = (
+        daily["gross_return"].mean() / gross_std * np.sqrt(TRADING_DAYS)
+        if gross_std > 0
+        else np.nan
+    )
+    net_sharpe = (
+        daily["net_return"].mean() / net_std * np.sqrt(TRADING_DAYS)
+        if net_std > 0
+        else np.nan
+    )
+
+    return pd.DataFrame(
+        [
+            {
+                "score_col": score_col,
+                "target_col": target_col,
+                "n_days": len(daily),
+                "mean_gross_return": daily["gross_return"].mean(),
+                "mean_trading_cost_return": daily[
+                    "trading_cost_return"
+                ].mean(),
+                "mean_borrow_cost_return": daily["borrow_cost_return"].mean(),
+                "mean_net_return": daily["net_return"].mean(),
+                "gross_ann_return": daily["gross_return"].mean() * TRADING_DAYS,
+                "net_ann_return": daily["net_return"].mean() * TRADING_DAYS,
+                "gross_sharpe": gross_sharpe,
+                "net_sharpe": net_sharpe,
+            }
+        ]
+    )
 
 
 def plot_decile_spread(
