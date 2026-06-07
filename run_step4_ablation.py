@@ -1,3 +1,4 @@
+import argparse
 from pathlib import Path
 
 import pandas as pd
@@ -10,7 +11,8 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 
 INPUT_PATH = PROJECT_ROOT / "outputs" / "alpha_scores.parquet"
 OUTPUT_DIR = PROJECT_ROOT / "step4_alpha" / "eval_output"
-OUTPUT_PATH = OUTPUT_DIR / "elastic_net_feature_ablation.csv"
+GROUP_OUTPUT_PATH = OUTPUT_DIR / "elastic_net_feature_ablation.csv"
+RISK_OUTPUT_PATH = OUTPUT_DIR / "elastic_net_risk_feature_ablation.csv"
 
 VALIDATION_FIRST_YEAR = 2021
 VALIDATION_LAST_YEAR = 2023
@@ -102,7 +104,52 @@ FEATURE_GROUPS = {
 }
 
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Run Elastic Net group or individual risk-feature ablation."
+    )
+    parser.add_argument(
+        "--mode",
+        choices=("risk", "groups"),
+        default="risk",
+        help=(
+            "risk removes each risk feature separately and preserves the "
+            "existing group-ablation CSV; groups reruns the original group test."
+        ),
+    )
+    return parser.parse_args()
+
+
+def build_feature_sets(
+    all_features: list[str],
+    mode: str,
+) -> dict[str, list[str]]:
+    """Build the full-model reference and requested leave-out variants."""
+    feature_sets = {"elastic_net_all": all_features}
+    if mode == "risk":
+        feature_sets.update(
+            {
+                f"elastic_net_no_{feature.removeprefix('z_feat_')}": [
+                    col for col in all_features if col != feature
+                ]
+                for feature in FEATURE_GROUPS["risk"]
+            }
+        )
+    else:
+        feature_sets.update(
+            {
+                f"elastic_net_no_{group_name}": [
+                    col for col in all_features if col not in group_cols
+                ]
+                for group_name, group_cols in FEATURE_GROUPS.items()
+            }
+        )
+    return feature_sets
+
+
 if __name__ == "__main__":
+    args = parse_args()
+
     if not INPUT_PATH.exists():
         raise FileNotFoundError(
             "Missing outputs/alpha_scores.parquet. "
@@ -121,13 +168,8 @@ if __name__ == "__main__":
             f"Feature-group mismatch. Missing={missing}; unknown={unknown}"
         )
 
-    feature_sets = {"elastic_net_all": all_features}
-    feature_sets.update({
-        f"elastic_net_no_{group_name}": [
-            col for col in all_features if col not in group_cols
-        ]
-        for group_name, group_cols in FEATURE_GROUPS.items()
-    })
+    feature_sets = build_feature_sets(all_features, args.mode)
+    output_path = RISK_OUTPUT_PATH if args.mode == "risk" else GROUP_OUTPUT_PATH
 
     result_rows = []
 
@@ -200,7 +242,7 @@ if __name__ == "__main__":
     ].sort_values("mean_ic", ascending=False)
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    result.to_csv(OUTPUT_PATH, index=False)
+    result.to_csv(output_path, index=False)
 
-    print(f"\nSaved Elastic Net feature ablation to: {OUTPUT_PATH}")
+    print(f"\nSaved Elastic Net {args.mode} ablation to: {output_path}")
     print(result.to_string(index=False))
