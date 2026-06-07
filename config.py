@@ -59,9 +59,43 @@ HTB_HIGH_SI         = 0.20        # short interest / float > 20% → Tier C
 HTB_DTC_THRESHOLD   = 10          # days-to-cover > 10 → flag as HTB
 
 # ── Basket construction ───────────────────────────────────────────────────────
-BASKET_QUANTILE     = 0.10        # top & bottom 10% of scores → long/short
+BASKET_QUANTILE     = 0.10        # conventional top/bottom decile reference
+BASELINE_BASKET_QUANTILE = 0.10   # conventional full-gross reference
+FINAL_BASKET_QUANTILE = 0.005     # high-conviction cost-aware headline basket
+BASKET_QUANTILES_SENSITIVITY = (0.005, 0.01, 0.025, 0.05, 0.10, 0.20)
 WEIGHTING_SCHEME    = "equal"     # "equal" | "score" | "vol"
+
+# The final headline score is the pre-selected expanding-window Random Forest.
+# It is inactive before the first OOS prediction year (2018); Step 5 may retain
+# those earlier dates as explicit zero-exposure warm-up days.
 FINAL_SCORE_COL     = "score_random_forest"
+COMPARISON_SCORE_COLS = [
+    "score_baseline",
+    "score_elastic_net",
+    "score_random_forest",
+]
+
+# ── Cost-aware signal-strength scaling ────────────────────────────────────────
+USE_SIGNAL_SCALING = True
+SIGNAL_SCALING_LOOKBACK = 252
+SIGNAL_SCALING_MIN_PERIODS = 60
+SIGNAL_SCALING_QUANTILE = 0.60
+SIGNAL_SCALING_MIN_MULT = 0.0
+SIGNAL_SCALING_MID_MULT = 0.5
+SIGNAL_SCALING_MAX_MULT = 1.0
+
+# ── Borrow-aware robustness setting ───────────────────────────────────────────
+USE_BORROW_ADJUSTED_SHORT_SCORE = False
+BORROW_SCORE_PENALTY = {
+    "A": 0.0,
+    "B": 0.25,
+    "C": 0.75,
+}
+
+# ── QuantStats settings ───────────────────────────────────────────────────────
+QUANTSTATS_AUM_LABEL = "250M"
+QUANTSTATS_START_DATE = "2010-01-01"
+QUANTSTATS_END_DATE = TRAIN_END
 
 # ── Reproducibility ──────────────────────────────────────────────────────────
 RANDOM_SEED         = 42

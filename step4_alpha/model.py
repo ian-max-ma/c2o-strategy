@@ -1,36 +1,23 @@
-import pandas as pd
 import numpy as np
-
-from sklearn.linear_model import ElasticNet
+import pandas as pd
 from sklearn.ensemble import RandomForestRegressor
+from sklearn.linear_model import ElasticNet
 
 
 def build_baseline_score(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Build the main 9-feature IC-aligned heuristic baseline alpha score.
-
-    Higher score means higher expected next overnight return.
-
-    The signs are chosen using single-feature IC diagnostics:
-    - positive IC features enter with a positive sign
-    - negative IC features enter with a negative sign
-
-    This baseline is used as the transparent benchmark for later ML models.
-    """
+    """Build the original transparent nine-feature baseline score."""
     df = df.copy()
-
     df["score_baseline"] = (
-        -df["z_feat_r_id_lag1"]          # negative IC: intraday reversal
-        -df["z_feat_r_cc_lag1"]          # negative IC: close-to-close reversal
-        +df["z_feat_vol20_lag1"]         # positive IC: overnight risk premium
-        +df["z_feat_log_adv20_lag1"]     # positive IC: liquidity / tradability
-        +df["z_feat_log_mcap_lag1"]      # positive IC: large-cap tilt
-        +df["z_feat_dsi_lag1"]           # positive IC: short-interest ratio
-        -df["z_feat_dtcn_lag1"]          # negative IC: crowded short pressure
-        -df["z_feat_ddtcn_lag1"]         # negative IC: rising crowding pressure
-        -df["z_feat_htb_flag_lag1"]      # negative IC: hard-to-borrow penalty
+        -df["z_feat_r_id_lag1"]
+        - df["z_feat_r_cc_lag1"]
+        + df["z_feat_vol20"]
+        + df["z_feat_log_adv20_lag1"]
+        + df["z_feat_log_mcap_lag1"]
+        + df["z_feat_dsi_lag1"]
+        - df["z_feat_dtcn_lag1"]
+        - df["z_feat_ddtcn_lag1"]
+        - df["z_feat_htb_flag_lag1"]
     )
-
     return df
 
 
@@ -44,21 +31,14 @@ def fit_predict_elastic_net(
     random_state: int = 42,
     max_train_rows: int | None = None,
 ) -> pd.Series:
-    """
-    Fit Elastic Net on the training sample and predict scores for the test sample.
-
-    The input features are already cross-sectionally standardized by date.
-    """
+    """Fit Elastic Net and return predictions indexed like test_df."""
     train = train_df.dropna(subset=[target_col])
-    test = test_df
-
     if max_train_rows is not None and len(train) > max_train_rows:
         train = train.sample(n=max_train_rows, random_state=random_state)
 
     x_train = train[feature_cols].to_numpy(dtype=np.float32, copy=False)
     y_train = train[target_col].to_numpy(dtype=np.float32, copy=False)
-    x_test = test[feature_cols].to_numpy(dtype=np.float32, copy=False)
-
+    x_test = test_df[feature_cols].to_numpy(dtype=np.float32, copy=False)
     model = ElasticNet(
         alpha=alpha,
         l1_ratio=l1_ratio,
@@ -66,16 +46,12 @@ def fit_predict_elastic_net(
         max_iter=5000,
         random_state=random_state,
     )
-
     model.fit(x_train, y_train)
-
-    pred = pd.Series(
+    return pd.Series(
         model.predict(x_test),
-        index=test.index,
+        index=test_df.index,
         name="score_elastic_net",
     )
-
-    return pred
 
 
 def expanding_window_elastic_net(
@@ -88,13 +64,7 @@ def expanding_window_elastic_net(
     l1_ratio: float = 0.5,
     max_train_rows: int | None = None,
 ) -> pd.DataFrame:
-    """
-    Generate out-of-sample Elastic Net scores using an expanding-window scheme.
-
-    For each prediction year Y, the model is trained only on observations with
-    date year < Y, then used to predict year Y. This avoids random-split
-    look-ahead bias and mimics a real forecasting setting.
-    """
+    """Generate annual expanding-window Elastic Net predictions."""
     df = df.copy()
     df["date"] = pd.to_datetime(df["date"])
     df["year"] = df["date"].dt.year
@@ -103,34 +73,26 @@ def expanding_window_elastic_net(
     for pred_year in range(first_pred_year, last_pred_year + 1):
         train_df = df[df["year"] < pred_year]
         test_df = df[df["year"] == pred_year]
-
         if train_df.empty or test_df.empty:
             print(f"[Elastic Net] Skipping {pred_year}: empty train or test sample.")
             continue
-
         print(
-            f"[Elastic Net] Train <= {pred_year - 1}, "
-            f"predict {pred_year}: "
+            f"[Elastic Net] Train <= {pred_year - 1}, predict {pred_year}: "
             f"{len(train_df):,} available train rows, "
             f"up to {max_train_rows or len(train_df):,} used, "
             f"{len(test_df):,} test rows"
         )
-
         pred = fit_predict_elastic_net(
-            train_df=train_df,
-            test_df=test_df,
-            feature_cols=feature_cols,
+            train_df,
+            test_df,
+            feature_cols,
             target_col=target_col,
             alpha=alpha,
             l1_ratio=l1_ratio,
             max_train_rows=max_train_rows,
         )
-
         df.loc[pred.index, "score_elastic_net"] = pred
-
-    df = df.drop(columns=["year"])
-
-    return df
+    return df.drop(columns=["year"])
 
 
 def fit_predict_random_forest(
@@ -145,23 +107,14 @@ def fit_predict_random_forest(
     random_state: int = 42,
     max_train_rows: int | None = 750_000,
 ) -> pd.Series:
-    """
-    Fit Random Forest on the training sample and predict scores for the test sample.
-
-    Random Forest is used to capture non-linear effects and feature interactions.
-    Conservative tree depth and large leaf size are used to reduce overfitting
-    on noisy daily stock-return data.
-    """
+    """Fit Random Forest and return predictions indexed like test_df."""
     train = train_df.dropna(subset=[target_col])
-    test = test_df
-
     if max_train_rows is not None and len(train) > max_train_rows:
         train = train.sample(n=max_train_rows, random_state=random_state)
 
     x_train = train[feature_cols].to_numpy(dtype=np.float32, copy=False)
     y_train = train[target_col].to_numpy(dtype=np.float32, copy=False)
-    x_test = test[feature_cols].to_numpy(dtype=np.float32, copy=False)
-
+    x_test = test_df[feature_cols].to_numpy(dtype=np.float32, copy=False)
     model = RandomForestRegressor(
         n_estimators=n_estimators,
         max_depth=max_depth,
@@ -170,16 +123,12 @@ def fit_predict_random_forest(
         random_state=random_state,
         n_jobs=-1,
     )
-
     model.fit(x_train, y_train)
-
-    pred = pd.Series(
+    return pd.Series(
         model.predict(x_test),
-        index=test.index,
+        index=test_df.index,
         name="score_random_forest",
     )
-
-    return pred
 
 
 def expanding_window_random_forest(
@@ -194,13 +143,7 @@ def expanding_window_random_forest(
     max_features: str | float = "sqrt",
     max_train_rows: int | None = 750_000,
 ) -> pd.DataFrame:
-    """
-    Generate out-of-sample Random Forest scores using an expanding-window scheme.
-
-    For each prediction year Y, the model is trained only on observations with
-    date year < Y, then used to predict year Y. This matches the timing logic
-    used for Elastic Net.
-    """
+    """Generate annual expanding-window Random Forest predictions."""
     df = df.copy()
     df["date"] = pd.to_datetime(df["date"])
     df["year"] = df["date"].dt.year
@@ -209,23 +152,19 @@ def expanding_window_random_forest(
     for pred_year in range(first_pred_year, last_pred_year + 1):
         train_df = df[df["year"] < pred_year]
         test_df = df[df["year"] == pred_year]
-
         if train_df.empty or test_df.empty:
             print(f"[Random Forest] Skipping {pred_year}: empty train or test sample.")
             continue
-
         print(
-            f"[Random Forest] Train <= {pred_year - 1}, "
-            f"predict {pred_year}: "
+            f"[Random Forest] Train <= {pred_year - 1}, predict {pred_year}: "
             f"{len(train_df):,} available train rows, "
             f"up to {max_train_rows or len(train_df):,} used, "
             f"{len(test_df):,} test rows"
         )
-
         pred = fit_predict_random_forest(
-            train_df=train_df,
-            test_df=test_df,
-            feature_cols=feature_cols,
+            train_df,
+            test_df,
+            feature_cols,
             target_col=target_col,
             n_estimators=n_estimators,
             max_depth=max_depth,
@@ -233,9 +172,5 @@ def expanding_window_random_forest(
             max_features=max_features,
             max_train_rows=max_train_rows,
         )
-
         df.loc[pred.index, "score_random_forest"] = pred
-
-    df = df.drop(columns=["year"])
-
-    return df
+    return df.drop(columns=["year"])

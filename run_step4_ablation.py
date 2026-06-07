@@ -19,16 +19,24 @@ MAX_TRAIN_ROWS = 500_000
 
 FEATURE_GROUPS = {
     "return": [
-        "z_feat_r_on_today",
         "z_feat_r_cc_lag1",
         "z_feat_r_id_lag1",
+        "z_feat_momentum_on_5",
+        "z_feat_momentum_id_5",
     ],
     "risk": [
-        "z_feat_vol20_lag1",
+        "z_feat_vol20",
+        "z_feat_vol20_on",
+        "z_feat_vol20_id",
+        "z_feat_range_lag1",
+        "z_feat_jump_lag1",
     ],
     "liquidity_size": [
         "z_feat_log_adv20_lag1",
         "z_feat_log_mcap_lag1",
+        "z_feat_turnover20",
+        "z_feat_amihud20",
+        "z_feat_price_lag1",
     ],
     "borrow_short_interest": [
         "z_feat_dsi_lag1",

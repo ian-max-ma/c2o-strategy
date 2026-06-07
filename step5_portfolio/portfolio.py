@@ -17,6 +17,8 @@ import pandas as pd
 from config import (
     AUM_LEVELS,
     BASKET_QUANTILE,
+    BASKET_QUANTILES_SENSITIVITY,
+    BORROW_SCORE_PENALTY,
     BORROW_TIER_A_BPS,
     BORROW_TIER_B_BPS,
     BORROW_TIER_C_BPS,
@@ -25,9 +27,16 @@ from config import (
     FINAL_SCORE_COL,
     PARTICIPATION_CAP,
     ROUNDTRIP_BPS,
+    SIGNAL_SCALING_LOOKBACK,
+    SIGNAL_SCALING_MAX_MULT,
+    SIGNAL_SCALING_MID_MULT,
+    SIGNAL_SCALING_MIN_MULT,
+    SIGNAL_SCALING_MIN_PERIODS,
+    SIGNAL_SCALING_QUANTILE,
     SLIPPAGE_BPS,
     TRADING_DAYS,
     TRAIN_END,
+    USE_BORROW_ADJUSTED_SHORT_SCORE,
     WEIGHTING_SCHEME,
 )
 
@@ -58,6 +67,9 @@ class PortfolioConfig:
     commission_bps: float = COMMISSION_BPS
     slippage_bps: float = SLIPPAGE_BPS
     roundtrip_bps: float = ROUNDTRIP_BPS
+    use_signal_scaling: bool = False
+    gross_multiplier_col: str = "gross_multiplier"
+    use_borrow_adjusted_short_score: bool = USE_BORROW_ADJUSTED_SHORT_SCORE
 
     @property
     def per_leg_cost_bps(self) -> float:
@@ -189,7 +201,12 @@ def choose_score_column(df: pd.DataFrame) -> str:
     construction. Other score columns are retained only for diagnostic
     comparison, not for ex-post portfolio selection.
     """
-    preferred = [FINAL_SCORE_COL, "score_elastic_net", "score_baseline"]
+    preferred = [
+        FINAL_SCORE_COL,
+        "score_random_forest",
+        "score_elastic_net",
+        "score_baseline",
+    ]
     for col in dict.fromkeys(preferred):
         if col in df.columns and df[col].notna().any():
             return col
@@ -198,16 +215,107 @@ def choose_score_column(df: pd.DataFrame) -> str:
 
 def available_score_columns(df: pd.DataFrame) -> list[str]:
     """Return usable Step 4 score columns in preferred model order."""
-    preferred = ["score_random_forest", "score_elastic_net", "score_baseline"]
-    return [col for col in preferred if col in df.columns and df[col].notna().any()]
+    preferred = [
+        FINAL_SCORE_COL,
+        "score_random_forest",
+        "score_elastic_net",
+        "score_baseline",
+    ]
+    return [
+        col
+        for col in dict.fromkeys(preferred)
+        if col in df.columns and df[col].notna().any()
+    ]
+
+
+def add_daily_signal_strength(
+    df: pd.DataFrame,
+    score_col: str,
+    basket_quantile: float = BASKET_QUANTILE,
+    lookback: int = SIGNAL_SCALING_LOOKBACK,
+    min_periods: int = SIGNAL_SCALING_MIN_PERIODS,
+    threshold_quantile: float = SIGNAL_SCALING_QUANTILE,
+    min_mult: float = SIGNAL_SCALING_MIN_MULT,
+    mid_mult: float = SIGNAL_SCALING_MID_MULT,
+    max_mult: float = SIGNAL_SCALING_MAX_MULT,
+) -> pd.DataFrame:
+    """
+    Estimate daily signal strength from cross-sectional score dispersion.
+
+    The threshold is computed from prior dates only via shift(1), so the
+    exposure decision for date t does not use realised returns or future score
+    dispersion. This is a cost-aware trading filter: when the model has little
+    cross-sectional separation, the strategy reduces or skips gross exposure.
+    """
+    rows = []
+    data = df.dropna(subset=[score_col]).copy()
+    for date, day in data.groupby("date"):
+        if len(day) < 2:
+            continue
+        n_side = max(1, int(np.floor(len(day) * basket_quantile)))
+        ranked = day.sort_values(score_col)
+        bottom = ranked.head(n_side)
+        top = ranked.tail(n_side)
+        rows.append(
+            {
+                "date": date,
+                "score_spread": top[score_col].mean() - bottom[score_col].mean(),
+                "n_candidates": len(day),
+                "n_each_side": n_side,
+            }
+        )
+
+    sig = pd.DataFrame(rows).sort_values("date")
+    if sig.empty:
+        return sig
+
+    sig["spread_threshold"] = (
+        sig["score_spread"]
+        .shift(1)
+        .rolling(lookback, min_periods=min_periods)
+        .quantile(threshold_quantile)
+    )
+    sig["spread_threshold_high"] = 1.25 * sig["spread_threshold"]
+    sig["gross_multiplier"] = np.select(
+        [
+            sig["score_spread"] < sig["spread_threshold"],
+            sig["score_spread"] < sig["spread_threshold_high"],
+        ],
+        [min_mult, mid_mult],
+        default=max_mult,
+    )
+    sig["gross_multiplier"] = sig["gross_multiplier"].fillna(max_mult)
+    return sig
+
+
+def add_borrow_adjusted_score(
+    df: pd.DataFrame,
+    score_col: str,
+    tier_col: str = "htb_tier",
+) -> pd.DataFrame:
+    """
+    Add a robustness-only short-selection score penalising expensive borrow.
+
+    Higher scores are less attractive shorts. Adding a tier penalty makes Tier
+    B/C names less likely to enter the short book, while all borrow costs remain
+    charged normally if those names are still selected.
+    """
+    out = df.copy()
+    if tier_col not in out.columns:
+        return out
+    score_std = out.groupby("date")[score_col].transform("std").replace(0, np.nan)
+    penalty = out[tier_col].map(BORROW_SCORE_PENALTY).fillna(0.0)
+    out[f"{score_col}_short_adjusted"] = out[score_col] + penalty * score_std.fillna(0.0)
+    return out
 
 
 def prepare_step5_input(alpha_scores: pd.DataFrame, panel_step3: pd.DataFrame) -> pd.DataFrame:
     """
     Merge Step 4 scores with Step 3 execution and borrow fields.
 
-    Step 4 supplies alpha scores and labels. Step 3 supplies ADV20, volatility,
-    eligibility and borrow tier fields needed for portfolio construction.
+    Step 4 supplies alpha scores and the realised next-overnight target used
+    for backtesting. Step 3 supplies ADV20, volatility, eligibility and borrow
+    tier fields needed for portfolio construction.
     """
     key = ["date", "instrument_id"]
     alpha = alpha_scores.copy()
@@ -247,8 +355,10 @@ def prepare_step5_input(alpha_scores: pd.DataFrame, panel_step3: pd.DataFrame) -
         merged = merged[merged["eligible"].fillna(False)].copy()
 
     if "target_raw" not in merged.columns:
-        merged = merged.sort_values(["instrument_id", "date"])
-        merged["target_raw"] = merged.groupby("instrument_id")["r_ON"].shift(-1)
+        raise ValueError(
+            "Step 5 requires target_raw from Step 4. Do not reconstruct the "
+            "backtest target inside Step 5 after the eligibility merge."
+        )
 
     merged["htb_tier"] = merged.get("htb_tier", "A")
     merged["htb_tier"] = merged["htb_tier"].fillna("A")
@@ -328,12 +438,25 @@ def build_daily_positions(day: pd.DataFrame, config: PortfolioConfig) -> pd.Data
         return day.assign(position=0.0, side="none")
 
     n_side = max(1, int(np.floor(len(day) * config.basket_quantile)))
-    ranked = day.sort_values(config.score_col, ascending=False).copy()
-    ranked["score_rank"] = np.arange(1, len(ranked) + 1)
-    long_df = ranked.head(n_side).copy()
-    short_df = ranked.tail(n_side).copy()
+    long_ranked = day.sort_values(config.score_col, ascending=False).copy()
+    long_ranked["score_rank"] = np.arange(1, len(long_ranked) + 1)
+    long_df = long_ranked.head(n_side).copy()
 
-    side_budget = config.aum * 0.5
+    short_score_col = config.score_col
+    adjusted_col = f"{config.score_col}_short_adjusted"
+    if config.use_borrow_adjusted_short_score and adjusted_col in day.columns:
+        short_score_col = adjusted_col
+    short_ranked = day.sort_values(short_score_col, ascending=True).copy()
+    short_ranked["score_rank"] = np.arange(1, len(short_ranked) + 1)
+    short_df = short_ranked.head(n_side).copy()
+
+    gross_multiplier = 1.0
+    if config.use_signal_scaling and config.gross_multiplier_col in day.columns:
+        gross_multiplier = float(day[config.gross_multiplier_col].iloc[0])
+    gross_multiplier = float(np.clip(gross_multiplier, 0.0, 1.0))
+    side_budget = config.aum * 0.5 * gross_multiplier
+    if side_budget <= 0:
+        return day.iloc[0:0].assign(position=0.0, side="none")
     long_alloc = allocate_with_caps(
         long_df,
         side_budget,
@@ -344,7 +467,7 @@ def build_daily_positions(day: pd.DataFrame, config: PortfolioConfig) -> pd.Data
     short_alloc = allocate_with_caps(
         short_df,
         side_budget,
-        config.score_col,
+        short_score_col,
         config.weighting_scheme,
         config.participation_cap,
     )
@@ -471,6 +594,7 @@ def performance_summary(
     gross_ret = daily["gross_return"].dropna()
     after_commission = daily["return_after_commission"].dropna()
     after_slippage = daily["return_after_slippage"].dropna()
+    active = daily[daily["n_positions"] > 0].copy()
 
     gross_sharpe = sharpe_ratio(gross_ret)
     after_commission_sharpe = sharpe_ratio(after_commission)
@@ -481,6 +605,8 @@ def performance_summary(
         "score_col": score_col,
         "aum_label": label,
         "aum": aum,
+        "basket_quantile": float(daily.attrs.get("basket_quantile", np.nan)),
+        "use_signal_scaling": bool(daily.attrs.get("use_signal_scaling", False)),
         "gross_ann_return": annualised_return(gross_ret),
         "commission_ann_drag": float(daily["commission_return"].mean() * TRADING_DAYS),
         "slippage_ann_drag": float(daily["slippage_return"].mean() * TRADING_DAYS),
@@ -503,6 +629,19 @@ def performance_summary(
         "avg_roundtrip_turnover": float(daily["roundtrip_turnover"].mean()),
         "avg_daily_turnover": float(daily["roundtrip_turnover"].mean()),
         "avg_gross_exposure": float(daily["gross_exposure"].mean()),
+        "pct_days_with_positions": float((daily["n_positions"] > 0).mean()),
+        "avg_n_long_active": (
+            float(active["n_long"].mean()) if not active.empty else 0.0
+        ),
+        "avg_n_short_active": (
+            float(active["n_short"].mean()) if not active.empty else 0.0
+        ),
+        "avg_gross_exposure_active": (
+            float(active["gross_exposure"].mean()) if not active.empty else 0.0
+        ),
+        "avg_daily_turnover_active": (
+            float(active["roundtrip_turnover"].mean()) if not active.empty else 0.0
+        ),
         "pct_days_full_target_gross": float(daily["hit_full_gross"].mean()),
         "pct_days_capacity_constrained": float(daily["capacity_constrained"].mean()),
         "avg_n_long": float(daily["n_long"].mean()),
@@ -524,8 +663,19 @@ def run_aum_backtests(
     score_col: str | None = None,
     aum_levels: dict[str, float] | None = None,
     participation_cap: float = PARTICIPATION_CAP,
+    basket_quantile: float = BASKET_QUANTILE,
+    use_signal_scaling: bool = False,
+    use_borrow_adjusted_short_score: bool = False,
+    include_all_target_dates: bool = False,
 ) -> tuple[pd.DataFrame, dict[str, pd.DataFrame], dict[str, pd.DataFrame]]:
-    """Run Step 5 for all required AUM levels."""
+    """
+    Run Step 5 for all required AUM levels.
+
+    include_all_target_dates keeps dates with no model score in the daily
+    return series as zero-exposure days. This is used for the headline ML
+    strategy so the 2010-2024 Section 6 window includes the pre-ML warm-up
+    period without inventing in-sample model predictions.
+    """
     if score_col is None:
         score_col = choose_score_column(step5_df)
     if aum_levels is None:
@@ -540,9 +690,22 @@ def run_aum_backtests(
             aum=aum,
             score_col=score_col,
             participation_cap=participation_cap,
+            basket_quantile=basket_quantile,
+            use_signal_scaling=use_signal_scaling,
+            use_borrow_adjusted_short_score=use_borrow_adjusted_short_score,
         )
         positions = build_positions(step5_df, config)
         daily = backtest_positions(positions, config)
+        if include_all_target_dates:
+            expected_mask = step5_df["target_raw"].notna()
+        else:
+            expected_mask = step5_df[score_col].notna() & step5_df["target_raw"].notna()
+        expected_dates = pd.Index(
+            pd.to_datetime(step5_df.loc[expected_mask, "date"].unique())
+        ).sort_values()
+        daily = fill_missing_daily_returns(daily, expected_dates, config)
+        daily.attrs["basket_quantile"] = basket_quantile
+        daily.attrs["use_signal_scaling"] = use_signal_scaling
 
         summaries.append(performance_summary(daily, label, aum, score_col))
         daily_by_aum[label] = daily
@@ -551,12 +714,69 @@ def run_aum_backtests(
     return pd.DataFrame(summaries), daily_by_aum, positions_by_aum
 
 
+def fill_missing_daily_returns(
+    daily: pd.DataFrame,
+    expected_dates: pd.Index,
+    config: PortfolioConfig,
+) -> pd.DataFrame:
+    """Keep zero-exposure signal-scaling dates in the daily return series."""
+    if expected_dates.empty:
+        return daily
+    daily = daily.copy()
+    daily["date"] = pd.to_datetime(daily["date"])
+    missing = expected_dates.difference(pd.Index(daily["date"]))
+    if len(missing) == 0:
+        return daily.sort_values("date").reset_index(drop=True)
+
+    zero = pd.DataFrame({"date": missing})
+    zero_cols = [
+        "gross_pnl",
+        "gross_notional",
+        "long_notional",
+        "short_notional",
+        "borrow_cost",
+        "gross_exposure",
+        "entry_turnover",
+        "exit_turnover",
+        "roundtrip_turnover",
+        "gross_return",
+        "trading_cost_return",
+        "commission_return",
+        "slippage_return",
+        "trading_cost",
+        "borrow_cost_return",
+        "return_after_commission",
+        "return_after_slippage",
+        "net_return_before_borrow",
+        "net_return",
+        "gross_return_bps",
+        "commission_bps",
+        "slippage_bps",
+        "borrow_bps",
+        "net_return_bps",
+        "n_long",
+        "n_short",
+        "n_positions",
+        "n_cap_binding",
+        "pct_cap_binding",
+        "max_participation",
+    ]
+    for col in zero_cols:
+        zero[col] = 0.0
+    zero["hit_full_gross"] = False
+    zero["capacity_constrained"] = False
+    out = pd.concat([daily, zero], ignore_index=True, sort=False)
+    return out.sort_values("date").reset_index(drop=True)
+
+
 def cap_sensitivity_analysis(
     step5_df: pd.DataFrame,
     score_col: str,
     aum_levels: dict[str, float] | None = None,
     headline_cap: float = PARTICIPATION_CAP,
     loose_cap: float = 1.0,
+    basket_quantile: float = BASKET_QUANTILE,
+    use_signal_scaling: bool = False,
 ) -> pd.DataFrame:
     """
     Compare the required 5% ADV cap with a loose-cap reference run.
@@ -578,6 +798,8 @@ def cap_sensitivity_analysis(
             score_col=score_col,
             aum_levels=aum_levels,
             participation_cap=cap,
+            basket_quantile=basket_quantile,
+            use_signal_scaling=use_signal_scaling,
         )
         audit = position_capacity_audit(
             positions_by_aum,
@@ -619,6 +841,46 @@ def cap_sensitivity_analysis(
                     ),
                 }
             )
+    return pd.DataFrame(rows)
+
+
+def basket_size_sensitivity(
+    step5_df: pd.DataFrame,
+    score_col: str,
+    aum: float = DEFAULT_AUM,
+    basket_quantiles: tuple[float, ...] = BASKET_QUANTILES_SENSITIVITY,
+    use_signal_scaling: bool = True,
+) -> pd.DataFrame:
+    """Run 250M sensitivity over alternative top/bottom basket sizes."""
+    rows = []
+    for q in basket_quantiles:
+        working = step5_df.copy()
+        if use_signal_scaling:
+            signal = add_daily_signal_strength(working, score_col, basket_quantile=q)
+            working = working.merge(
+                signal[
+                    [
+                        "date",
+                        "score_spread",
+                        "spread_threshold",
+                        "spread_threshold_high",
+                        "gross_multiplier",
+                    ]
+                ],
+                on="date",
+                how="left",
+            )
+            working["gross_multiplier"] = working["gross_multiplier"].fillna(1.0)
+        summary, _, _ = run_aum_backtests(
+            working,
+            score_col=score_col,
+            aum_levels={"250M": aum},
+            basket_quantile=q,
+            use_signal_scaling=use_signal_scaling,
+        )
+        row = summary.iloc[0].to_dict()
+        row["basket_quantile"] = q
+        rows.append(row)
     return pd.DataFrame(rows)
 
 
@@ -856,6 +1118,58 @@ def rolling_window_diagnostics(
     return pd.DataFrame(rows)
 
 
+def non_overlapping_subperiod_summary(
+    daily: pd.DataFrame,
+    return_col: str = "net_return",
+    windows: tuple[tuple[str, str, str], ...] = (
+        ("2010_2012", "2010-01-01", "2012-12-31"),
+        ("2013_2016", "2013-01-01", "2016-12-31"),
+        ("2017_2019", "2017-01-01", "2019-12-31"),
+        ("2020_2022", "2020-01-01", "2022-12-31"),
+        ("2023_2024", "2023-01-01", "2024-12-31"),
+    ),
+) -> pd.DataFrame:
+    """
+    Summarise Sharpe stability across non-overlapping calendar subperiods.
+
+    This directly supports the Section 7 self-check question on whether Sharpe
+    is stable across non-overlapping windows.
+    """
+    data = daily.copy()
+    data["date"] = pd.to_datetime(data["date"])
+    rows = []
+    for label, start, end in windows:
+        window = data[
+            (data["date"] >= pd.Timestamp(start))
+            & (data["date"] <= pd.Timestamp(end))
+        ]
+        ret = window[return_col].replace([np.inf, -np.inf], np.nan).dropna()
+        rows.append(
+            {
+                "subperiod": label,
+                "start": start,
+                "end": end,
+                "n_days": int(len(ret)),
+                "cumulative_return": cumulative_return(ret),
+                "ann_return": annualised_return(ret),
+                "ann_vol": annualised_volatility(ret),
+                "sharpe": sharpe_ratio(ret),
+                "max_drawdown": max_drawdown(ret),
+                "avg_gross_exposure": (
+                    float(window["gross_exposure"].mean())
+                    if "gross_exposure" in window.columns and not window.empty
+                    else np.nan
+                ),
+                "avg_daily_turnover": (
+                    float(window["roundtrip_turnover"].mean())
+                    if "roundtrip_turnover" in window.columns and not window.empty
+                    else np.nan
+                ),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
 def robustness_diagnostics(daily: pd.DataFrame) -> pd.DataFrame:
     """
     Additional Step 6 statistical robustness checks for the 250M portfolio.
@@ -937,6 +1251,8 @@ def borrow_sensitivity_analysis(
     base_positions_250m: pd.DataFrame,
     score_col: str,
     aum: float = DEFAULT_AUM,
+    basket_quantile: float = BASKET_QUANTILE,
+    use_signal_scaling: bool = False,
 ) -> pd.DataFrame:
     """
     Compare tiered borrow costs with hard-borrow exclusion scenarios.
@@ -947,7 +1263,8 @@ def borrow_sensitivity_analysis(
 
     The caller should pass the same analysis window for step5_df, base_summary
     and base_positions_250m so the hard-exclusion rows are comparable to the
-    baseline row.
+    baseline row. basket_quantile and use_signal_scaling must also match the
+    baseline run, otherwise hard-exclusion comparisons are not like-for-like.
     """
     base_row = base_summary.loc[base_summary["aum"] == aum].iloc[0].to_dict()
     rows = [
@@ -981,6 +1298,8 @@ def borrow_sensitivity_analysis(
             step5_df[mask].copy(),
             score_col=score_col,
             aum_levels={"250M": aum},
+            basket_quantile=basket_quantile,
+            use_signal_scaling=use_signal_scaling,
         )
         row = scenario_summary.iloc[0].to_dict()
         rows.append(
@@ -1114,18 +1433,26 @@ def plot_return_quantiles(
 def figure_captions(
     strategy_name: str = "Random Forest",
     quantile_figure: str = "assets/250M_random_forest_strategy_return_quantiles.png",
+    basket_quantile: float = BASKET_QUANTILE,
+    use_signal_scaling: bool = False,
 ) -> pd.DataFrame:
     """Captions with AUM, basket size and cap assumptions for all Step 5 figures."""
+    scaling_text = (
+        "with trailing score-dispersion signal-strength gross scaling"
+        if use_signal_scaling
+        else "with full target gross exposure"
+    )
+    basket_pct = f"{basket_quantile:.1%}"
     return pd.DataFrame(
         [
             {
                 "figure": "gross_to_net_decomposition.png",
                 "caption": (
                     "Gross-to-net annualised return decomposition for 50M, 250M "
-                    "and 1B AUM. Portfolio uses top/bottom 10% baskets, equal "
+                    f"and 1B AUM. Portfolio uses top/bottom {basket_pct} baskets, equal "
                     "weights within each side, 5% ADV single-name cap, daily "
-                    "dollar-neutral matching after caps, and the fixed Table 6.1 "
-                    "cost schedule."
+                    f"dollar-neutral matching after caps, {scaling_text}, and "
+                    "the fixed Table 6.1 cost schedule."
                 ),
             },
             {
@@ -1133,7 +1460,8 @@ def figure_captions(
                 "caption": (
                     f"Calendar-year compounded net returns for the 250M {strategy_name} "
                     "Step 4 ML strategy versus SP500_TR. Portfolio uses "
-                    "top/bottom 10% baskets, equal side weights, and a 5% ADV cap."
+                    f"top/bottom {basket_pct} baskets, equal side weights, "
+                    f"{scaling_text}, and a 5% ADV cap."
                 ),
             },
             {
@@ -1142,7 +1470,8 @@ def figure_captions(
                     f"Distribution of 250M {strategy_name} strategy net returns after "
                     "commission, slippage and borrow. Daily returns are compounded "
                     "to weekly, monthly, quarterly and yearly periods. Assumptions: "
-                    "top/bottom 10% baskets, equal weights, 5% ADV cap."
+                    f"top/bottom {basket_pct} baskets, equal weights, "
+                    f"{scaling_text}, 5% ADV cap."
                 ),
             },
         ]

@@ -3,11 +3,14 @@ import pandas as pd
 
 from step5_portfolio.portfolio import (
     PortfolioConfig,
+    add_daily_signal_strength,
     backtest_positions,
     build_daily_positions,
     borrow_sensitivity_analysis,
     cap_sensitivity_analysis,
+    choose_score_column,
     cost_schedule_summary,
+    non_overlapping_subperiod_summary,
     prepare_step5_input,
     robustness_diagnostics,
     run_aum_backtests,
@@ -24,6 +27,19 @@ def test_cost_schedule_roundtrip_is_four_bps() -> None:
 
     assert roundtrip == 4.0
     assert config.per_leg_cost_bps == 2.0
+
+
+def test_choose_score_column_uses_prespecified_final_score() -> None:
+    df = pd.DataFrame(
+        {
+            "score_final_hybrid": [0.5, 0.6],
+            "score_random_forest": [0.1, np.nan],
+            "score_elastic_net": [0.2, 0.3],
+            "score_baseline": [0.4, 0.5],
+        }
+    )
+
+    assert choose_score_column(df) == "score_random_forest"
 
 
 def test_daily_trading_cost_is_four_bps_at_full_gross() -> None:
@@ -43,6 +59,10 @@ def test_daily_trading_cost_is_four_bps_at_full_gross() -> None:
     assert np.isclose(daily["gross_exposure"].iloc[0], 1.0)
     assert np.isclose(daily["roundtrip_turnover"].iloc[0], 2.0)
     assert np.isclose(daily["trading_cost_return"].iloc[0], 0.0004)
+    assert np.isclose(
+        daily["trading_cost_return"].iloc[0],
+        daily["gross_exposure"].iloc[0] * (config.roundtrip_bps / 10_000),
+    )
     assert np.isclose(daily["commission_return"].iloc[0], 0.0001)
     assert np.isclose(daily["slippage_return"].iloc[0], 0.0003)
 
@@ -73,7 +93,7 @@ def test_daily_positions_are_dollar_neutral_and_respect_adv_cap() -> None:
     assert (positions["side"] == "short").sum() == 2
 
 
-def test_target_raw_uses_next_day_overnight_return() -> None:
+def test_prepare_step5_input_requires_step4_target_raw() -> None:
     alpha = pd.DataFrame(
         {
             "date": pd.to_datetime(["2020-01-01", "2020-01-02", "2020-01-03"]),
@@ -92,16 +112,12 @@ def test_target_raw_uses_next_day_overnight_return() -> None:
         }
     )
 
-    out = prepare_step5_input(alpha, panel).sort_values("date")
-
-    assert np.isclose(
-        out.loc[out["date"] == pd.Timestamp("2020-01-01"), "target_raw"].iloc[0],
-        0.02,
-    )
-    assert np.isclose(
-        out.loc[out["date"] == pd.Timestamp("2020-01-02"), "target_raw"].iloc[0],
-        0.03,
-    )
+    try:
+        prepare_step5_input(alpha, panel)
+    except ValueError as exc:
+        assert "requires target_raw from Step 4" in str(exc)
+    else:
+        raise AssertionError("prepare_step5_input should not reconstruct target_raw.")
 
 
 def test_robustness_diagnostics_include_lo_and_rolling_checks() -> None:
@@ -119,6 +135,27 @@ def test_robustness_diagnostics_include_lo_and_rolling_checks() -> None:
     assert "worst_rolling_6m_return" in set(out["diagnostic"])
     assert "worst_rolling_12m_return" in set(out["diagnostic"])
     assert out["diagnostic"].str.startswith("annual_net_sharpe_").any()
+
+
+def test_non_overlapping_subperiod_summary_outputs_required_windows() -> None:
+    daily = pd.DataFrame(
+        {
+            "date": pd.bdate_range("2010-01-01", "2024-12-31"),
+            "net_return": 0.0001,
+            "gross_exposure": 1.0,
+            "roundtrip_turnover": 2.0,
+        }
+    )
+
+    out = non_overlapping_subperiod_summary(daily)
+
+    assert set(out["subperiod"]) == {
+        "2010_2012",
+        "2013_2016",
+        "2017_2019",
+        "2020_2022",
+        "2023_2024",
+    }
 
 
 def test_borrow_sensitivity_outputs_hard_exclusion_scenarios() -> None:
@@ -150,11 +187,14 @@ def test_borrow_sensitivity_outputs_hard_exclusion_scenarios() -> None:
         positions_by_aum["250M"],
         "score_baseline",
         aum=250_000_000,
+        basket_quantile=0.10,
+        use_signal_scaling=False,
     )
 
     assert "hard_exclude_tier_C" in set(out["scenario"])
     assert "hard_exclude_tier_BC" in set(out["scenario"])
     assert "short_interest_gt_10pct_short_book_contribution" in set(out["scenario"])
+    assert set(out["n_days"].dropna()) == {len(dates)}
 
 
 def test_cap_sensitivity_compares_headline_and_loose_cap() -> None:
@@ -191,3 +231,42 @@ def test_cap_sensitivity_compares_headline_and_loose_cap() -> None:
         out["scenario"] == "loose_100pct_adv_reference",
         "avg_gross_exposure",
     ].iloc[0]
+
+
+def test_signal_strength_scaling_keeps_dates_and_reduces_exposure() -> None:
+    rows = []
+    dates = pd.bdate_range("2020-01-01", periods=90)
+    for date_idx, date in enumerate(dates):
+        for i in range(20):
+            score = i if date_idx < 70 else i * 0.001
+            rows.append(
+                {
+                    "date": date,
+                    "instrument_id": i,
+                    "score_baseline": score,
+                    "target_raw": 0.001 * (1 if i >= 10 else -1),
+                    "adv20": 100_000_000.0,
+                    "htb_tier": "A",
+                }
+            )
+    step5_df = pd.DataFrame(rows)
+    sig = add_daily_signal_strength(
+        step5_df,
+        "score_baseline",
+        basket_quantile=0.10,
+        lookback=30,
+        min_periods=10,
+        threshold_quantile=0.60,
+    )
+    scaled = step5_df.merge(sig[["date", "gross_multiplier"]], on="date", how="left")
+    scaled["gross_multiplier"] = scaled["gross_multiplier"].fillna(1.0)
+    summary, daily_by_aum, _ = run_aum_backtests(
+        scaled,
+        score_col="score_baseline",
+        aum_levels={"250M": 250_000_000},
+        basket_quantile=0.10,
+        use_signal_scaling=True,
+    )
+
+    assert daily_by_aum["250M"]["date"].nunique() == len(dates)
+    assert summary["avg_gross_exposure"].iloc[0] < 1.0

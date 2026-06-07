@@ -1,7 +1,9 @@
 from pathlib import Path
 import pandas as pd
 from step4_alpha.evaluation import (
+    cost_aware_decile_summary,
     ic_summary,
+    daily_score_spread,
     decile_spread_summary,
     plot_decile_spread,
     plot_ic_summary,
@@ -14,8 +16,6 @@ BASELINE_INPUT_PATH = PROJECT_ROOT / "outputs" / "alpha_scores.parquet"
 OUTPUT_DIR = PROJECT_ROOT / "step4_alpha" / "eval_output"
 OUTPUT_PATH = OUTPUT_DIR / "ic_summary_ml.csv"
 BASELINE_FULL_IC_PATH = OUTPUT_DIR / "ic_baseline_full_sample.csv"
-BASELINE_FULL_DECILE_PATH = OUTPUT_DIR / "decile_spread_baseline_full_sample.csv"
-BASELINE_FULL_DECILE_PLOT_PATH = OUTPUT_DIR / "decile_spread_baseline_full_sample.png"
 
 IC_PLOT_PATH = OUTPUT_DIR / "ic_summary_ml.png"
 
@@ -31,21 +31,23 @@ if __name__ == "__main__":
 
     score_cols = [c for c in df.columns if c.startswith("z_feat_")]
 
-    for col in ["score_baseline", "score_elastic_net", "score_random_forest"]:
+    for col in [
+        "score_baseline",
+        "score_elastic_net",
+        "score_random_forest",
+    ]:
         if col in df.columns:
             score_cols.append(col)
 
-    # Use the common OOS window for the headline comparison. Each individual
-    # decile diagnostic below uses only the non-null sample for its own score.
     model_score_cols = [
         col for col in ["score_elastic_net", "score_random_forest"]
         if col in df.columns
     ]
-    df_model = (
-        df.dropna(subset=model_score_cols).copy()
-        if model_score_cols
-        else df.copy()
-    )
+
+    if model_score_cols:
+        df_model = df.dropna(subset=model_score_cols).copy()
+    else:
+        df_model = df.copy()
 
     print(f"Evaluation sample rows: {len(df_model):,}")
     print(f"Evaluation date range: {df_model['date'].min()} → {df_model['date'].max()}")
@@ -74,21 +76,6 @@ if __name__ == "__main__":
 
         print(f"\nSaved full-sample baseline IC to: {BASELINE_FULL_IC_PATH}")
         print(ic_baseline_full.to_string(index=False))
-
-        decile_baseline_full = decile_spread_summary(
-            df_baseline_full,
-            score_col="score_baseline",
-        )
-        decile_baseline_full.to_csv(BASELINE_FULL_DECILE_PATH, index=False)
-        plot_decile_spread(
-            decile_baseline_full,
-            BASELINE_FULL_DECILE_PLOT_PATH,
-            title="Baseline Score Decile Spread (2010-2024)",
-        )
-        print(
-            "Saved full-sample baseline decile spread to: "
-            f"{BASELINE_FULL_DECILE_PATH}"
-        )
     else:
         print(
             "\nSkipping full-sample baseline IC: "
@@ -105,15 +92,18 @@ if __name__ == "__main__":
 
     DECILE_RANDOM_FOREST_OUTPUT_PATH = OUTPUT_DIR / "decile_spread_random_forest.csv"
     DECILE_RANDOM_FOREST_PLOT_PATH = OUTPUT_DIR / "decile_spread_random_forest.png"
+    DECILE_COMBINED_OUTPUT_PATH = OUTPUT_DIR / "decile_spread_by_score.csv"
+
+    combined_deciles = []
 
 
-    # This baseline file intentionally uses the ML OOS window for a like-for-like
-    # comparison with Elastic Net and Random Forest.
-    decile_baseline = decile_spread_summary(
-        df_model.dropna(subset=["score_baseline"]),
-        score_col="score_baseline",
-    )
+    decile_baseline = decile_spread_summary(df_model, score_col="score_baseline")
+    combined_deciles.append(decile_baseline.assign(score_col="score_baseline"))
     decile_baseline.to_csv(DECILE_BASELINE_OUTPUT_PATH, index=False)
+    daily_score_spread(df_model, "score_baseline").to_csv(
+        OUTPUT_DIR / "daily_spread_score_baseline.csv",
+        index=False,
+    )
 
     plot_decile_spread(
         decile_baseline,
@@ -124,13 +114,14 @@ if __name__ == "__main__":
     print(f"\nSaved baseline decile spread to: {DECILE_BASELINE_OUTPUT_PATH}")
     print(decile_baseline.to_string(index=False))
 
-    if "score_elastic_net" in df.columns:
-        df_elastic_net = df.dropna(subset=["score_elastic_net"])
-        decile_elastic_net = decile_spread_summary(
-            df_elastic_net,
-            score_col="score_elastic_net",
-        )
+    if "score_elastic_net" in df_model.columns:
+        decile_elastic_net = decile_spread_summary(df_model, score_col="score_elastic_net")
+        combined_deciles.append(decile_elastic_net.assign(score_col="score_elastic_net"))
         decile_elastic_net.to_csv(DECILE_ELASTIC_NET_OUTPUT_PATH, index=False)
+        daily_score_spread(df_model, "score_elastic_net").to_csv(
+            OUTPUT_DIR / "daily_spread_score_elastic_net.csv",
+            index=False,
+        )
 
         plot_decile_spread(
             decile_elastic_net,
@@ -141,13 +132,14 @@ if __name__ == "__main__":
         print(f"\nSaved Elastic Net decile spread to: {DECILE_ELASTIC_NET_OUTPUT_PATH}")
         print(decile_elastic_net.to_string(index=False))
 
-    if "score_random_forest" in df.columns:
-        df_random_forest = df.dropna(subset=["score_random_forest"])
-        decile_random_forest = decile_spread_summary(
-            df_random_forest,
-            score_col="score_random_forest",
-        )
+    if "score_random_forest" in df_model.columns:
+        decile_random_forest = decile_spread_summary(df_model, score_col="score_random_forest")
+        combined_deciles.append(decile_random_forest.assign(score_col="score_random_forest"))
         decile_random_forest.to_csv(DECILE_RANDOM_FOREST_OUTPUT_PATH, index=False)
+        daily_score_spread(df_model, "score_random_forest").to_csv(
+            OUTPUT_DIR / "daily_spread_score_random_forest.csv",
+            index=False,
+        )
 
         plot_decile_spread(
             decile_random_forest,
@@ -157,6 +149,36 @@ if __name__ == "__main__":
 
         print(f"\nSaved Random Forest decile spread to: {DECILE_RANDOM_FOREST_OUTPUT_PATH}")
         print(decile_random_forest.to_string(index=False))
+
+    if combined_deciles:
+        pd.concat(combined_deciles, ignore_index=True).to_csv(
+            DECILE_COMBINED_OUTPUT_PATH,
+            index=False,
+        )
+        print(f"\nSaved combined decile spread by score to: {DECILE_COMBINED_OUTPUT_PATH}")
+
+    cost_aware_rows = []
+    for col in [
+        "score_baseline",
+        "score_elastic_net",
+        "score_random_forest",
+    ]:
+        if col in df_model.columns:
+            cost_eval = cost_aware_decile_summary(df_model, score_col=col)
+            if not cost_eval.empty:
+                cost_eval.to_csv(
+                    OUTPUT_DIR / f"cost_aware_decile_{col}.csv",
+                    index=False,
+                )
+                cost_aware_rows.append(cost_eval)
+    if cost_aware_rows:
+        cost_aware_all = pd.concat(cost_aware_rows, ignore_index=True)
+        cost_aware_all.to_csv(
+            OUTPUT_DIR / "cost_aware_decile_summary.csv",
+            index=False,
+        )
+        print("\nSaved cost-aware decile summary:")
+        print(cost_aware_all.to_string(index=False))
 
     # plot
     plot_ic_summary(ic, IC_PLOT_PATH)
