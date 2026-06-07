@@ -47,9 +47,9 @@ Any alpha feature must be OBSERVABLE by 15:50 ET on day t.
   r_ID_lag1       YES  — pre-shifted version of r_ID, safe to use directly
   market_cap_lag1 YES  — pre-shifted version of market_cap, safe to use directly
 
-Rule: in Steps 4 & 5, ONLY use r_CC_lag1 / r_ID_lag1 / market_cap_lag1
-as features. Never use the raw r_CC / r_ID / market_cap directly as an
-alpha input — those are kept in the panel for analysis/attribution only.
+Rule: r_ON is safe on date t. For close-dependent fields, use only
+r_CC_lag1 / r_ID_lag1 / market_cap_lag1 as features. Never use raw r_CC,
+r_ID, or market_cap as alpha inputs; those are retained for attribution.
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 """
 
