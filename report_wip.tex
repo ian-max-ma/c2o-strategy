@@ -755,18 +755,353 @@ and \texttt{market\_cap\_lag1} are observable at 15:50~ET on day~$t$.
 The \texttt{all\_data.parquet} file provides additional alpha columns
 (\texttt{sue}, \texttt{epsp}, \texttt{epsf}) keyed by \texttt{stock\_id}
 (= \texttt{instrument\_id} in the panel).}
-
 %==================================================================
 \section{Step 5 --- Portfolio Construction and Backtesting}
 %==================================================================
 
-\ins{Dollar-neutral long-short overnight portfolio using the signals from
-Step~4.  Apply \texttt{eligible} filter (removes PRICE/ADV/VOL/EARN\_WINDOW
-failures).  Weight by signal rank or z-score; size by \texttt{market\_cap\_lag1}
-or equal-weight.
-Transaction costs: commission 0.5~bps/leg, slippage 1.5~bps/leg (Table~6.1).
-Borrow cost: per HTB tier (Step~3 Q1).
-Report Sharpe, max drawdown, turnover.}
+
+%------------------------------------------------------------------
+\subsection*{Q1 \quad Basket design, weighting and daily turnover}
+\addcontentsline{toc}{subsection}{Q1 \quad Basket design, weighting and daily turnover}
+%------------------------------------------------------------------
+
+The final portfolio converts the Step 4 Random Forest score into a daily
+close-to-open long--short strategy. On each trading day, all eligible stocks are
+ranked cross-sectionally by their model score. The strategy buys the top
+0.5\% of the score distribution and shorts the bottom 0.5\%, with equal weights
+inside each leg. Positions are resized if the 5\% ADV single-name participation
+cap binds, and the long and short books are then rescaled to maintain strict
+dollar neutrality.
+
+A trailing score-dispersion rule scales gross exposure down on weak-signal days.
+This is economically important because the strategy trades daily from MOC to MOO:
+each active position requires a closing-auction entry and an opening-auction exit.
+Suppressing low-conviction trading days directly reduces unnecessary turnover and
+auction slippage.
+
+\paragraph{Why equal weighting?}
+Equal weighting is chosen because it avoids imposing a second layer of noisy
+estimation on top of the Step 4 score. Score-weighting would require the Random
+Forest output to be well calibrated in magnitude, not just correctly ranked.
+Volatility-weighting would introduce another rolling estimator and may overfit
+the realised volatility window. For a narrow overnight basket, equal weighting is
+therefore the most transparent and least fragile implementation.
+
+\paragraph{Why a 0.5\% basket?}
+The 0.5\% basket is a cost-aware high-conviction design rather than cosmetic
+Sharpe optimisation. In the common 2018--2024 scaled OOS diagnostic window, net
+Sharpe falls monotonically from 0.831 at the 0.5\% basket to 0.425 at 1.0\%,
+turns negative at 2.5\%, and reaches $-0.794$ at 20\%. This confirms that the
+Random Forest signal is concentrated in the extreme score tails. Wider baskets
+dilute the alpha into lower-ranked names while still paying daily MOC/MOO
+round-trip costs.
+
+The full-window average basket size appears low because the 2010--2024 window
+includes zero-exposure warm-up dates and weak-signal days suppressed by the
+dispersion-scaling rule. Conditional on active trading days, the 250M portfolio
+holds approximately four long and four short names.
+
+\begin{table}[H]
+\centering
+\caption{Basket design and turnover diagnostics. Top/bottom 0.5\% equal-weight baskets, 5\% ADV cap, signal-strength scaling, Section 6.3 cost schedule, 2010--2024 with zero-exposure warm-up. Sources: \texttt{section6\_final\_basket\_turnover.csv}, \texttt{performance\_summary.csv}.}
+\small
+\begin{tabular}{p{4.0cm} p{2.5cm} p{2.8cm} p{5.2cm}}
+\toprule
+\textbf{Metric} & \textbf{Full 2010--2024} & \textbf{Active Trading Days} & \textbf{Interpretation} \\
+\midrule
+Basket quantile, each side & 0.5\% & 0.5\% & High-conviction score tails \\
+Weighting scheme & Equal & Equal & Transparent; avoids overfitting \\
+Participation cap & 5\% ADV & 5\% ADV & Single-name capacity control \\
+Avg long names & 0.92 & 3.95 & Full-window diluted by warm-up days \\
+Avg short names & 0.92 & 3.95 & Active book is approximately 4 long / 4 short \\
+250M gross exposure & 7.20\% & 30.99\% & Signal scaling suppresses weak-signal days \\
+250M daily turnover & 14.40\% & 61.98\% & Daily MOC/MOO round trip on active exposure \\
+Days with positions & 23.23\% & 100\% & Remaining days are zero-exposure \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%------------------------------------------------------------------
+\subsection*{Q2 \quad Headline performance and AUM capacity interpretation}
+\addcontentsline{toc}{subsection}{Q2 \quad Headline performance and AUM capacity interpretation}
+%------------------------------------------------------------------
+
+Table~\ref{tab:step5_headline} reports headline performance at all three AUM
+levels under the fixed Section 6.3 cost schedule over the 2010--2024 development
+window. All metrics are net of commission, auction slippage and borrow. The
+stronger 0.831 Sharpe reported in the robustness diagnostics uses the common
+2018--2024 scaled OOS diagnostic window and is not the official headline figure.
+
+The 250M portfolio is the strongest headline case, with a 2.03\% net annual
+return and 0.562 net Sharpe. The cross-AUM pattern is mainly a capacity and
+exposure effect. At 50M, the per-name ticket is smaller, so the portfolio can
+deploy more gross exposure, but this also raises volatility and drawdown. At
+1B, the same narrow 0.5\% basket implies much larger per-name target positions,
+so the 5\% ADV cap binds almost every active day and compresses deployable gross
+exposure to only 2.18\%. The lower volatility at 1B is therefore not evidence of
+stronger alpha at scale; it is primarily a capacity constraint.
+
+\begin{table}[H]
+\centering
+\caption{Headline performance and capacity diagnostics under the Section 6.3 fixed cost schedule, 2010--2024.}
+\label{tab:step5_headline}
+
+\vspace{0.4em}
+\small
+\renewcommand{\arraystretch}{1.18}
+
+\textbf{Panel A: Net performance}
+
+\vspace{0.25em}
+\setlength{\tabcolsep}{9pt}
+\begin{tabular}{lrrrrr}
+\toprule
+\textbf{AUM} &
+\shortstack{\textbf{Net Ann.}\\\textbf{Return}} &
+\shortstack{\textbf{Net}\\\textbf{Vol}} &
+\shortstack{\textbf{Net}\\\textbf{Sharpe}} &
+\shortstack{\textbf{Max}\\\textbf{DD}} &
+\shortstack{\textbf{Avg}\\\textbf{Turnover}} \\
+\midrule
+50M
+& 1.14\% & 5.07\% & 0.22  & $-19.92\%$ & 28.37\% \\
+\textbf{250M}
+& \textbf{2.03\%} & \textbf{3.62\%} & \textbf{0.562}
+& \textbf{$-9.02\%$} & \textbf{14.40\%} \\
+1B
+& 0.51\% & 1.72\% & 0.30  & $-6.01\%$ & 4.36\% \\
+\bottomrule
+\end{tabular}
+
+\vspace{1.0em}
+
+\textbf{Panel B: Capacity and borrow diagnostics}
+
+\vspace{0.25em}
+\setlength{\tabcolsep}{10pt}
+\begin{tabular}{lrrrr}
+\toprule
+\textbf{AUM} &
+\shortstack{\textbf{Avg Gross}\\\textbf{Exposure}} &
+\shortstack{\textbf{Days at Full}\\\textbf{Target Gross}} &
+\shortstack{\textbf{Cap-Constrained}\\\textbf{Days}} &
+\shortstack{\textbf{Borrow}\\\textbf{Sharpe Drag}} \\
+\midrule
+50M
+& 14.18\% & 5.79\% & 17.43\% & 0.008 \\
+\textbf{250M}
+& \textbf{7.20\%} & \textbf{0.43\%} & \textbf{22.80\%} & \textbf{0.005} \\
+1B
+& 2.18\% & 0.00\% & 23.23\% & 0.004 \\
+\bottomrule
+\end{tabular}
+
+\vspace{0.5em}
+\caption*{\footnotesize
+\textit{Note.} All metrics are net of commission, auction slippage and daily borrow by A/B/C tier.
+Commission is 0.5 bps per leg and auction slippage is 1.5 bps per leg.
+Sources: \texttt{section6\_final\_headline\_performance\_2010\_2024.csv},
+\texttt{performance\_summary.csv}, and \texttt{capacity\_diagnostics.csv}.}
+\end{table}
+
+The reported gross exposure is realised gross after both the 5\% ADV cap and
+the signal-strength scaling rule. The strategy does not force unused capital
+into low-liquidity or low-conviction names; when the basket cannot absorb the
+target book without breaching capacity or conviction constraints, gross exposure
+is deliberately reduced.
+
+The ``Days at Full Target'' column is diagnostically important because it shows
+how often the participation cap is non-binding. At 1B, this value is 0.00\%,
+meaning that the strategy never reaches the theoretical target gross exposure on
+active days. At 250M, only 0.43\% of days reach full target gross. This confirms
+that the 5\% ADV participation cap is economically binding rather than cosmetic.
+
+%------------------------------------------------------------------
+%------------------------------------------------------------------
+\subsection*{Q3 \quad Gross-to-net degradation and cost attribution}
+\addcontentsline{toc}{subsection}{Q3 \quad Gross-to-net degradation and cost attribution}
+%------------------------------------------------------------------
+
+The gross-to-net decomposition shows that implementation risk is dominated by
+execution costs rather than borrow. At 250M AUM, the Sharpe waterfall is:
+\[
+\underbrace{0.768}_{\text{Gross Sharpe}}
+-
+\underbrace{0.050}_{\text{commission}}
+-
+\underbrace{0.151}_{\text{slippage}}
+-
+\underbrace{0.005}_{\text{borrow}}
+=
+\underbrace{\mathbf{0.562}}_{\text{Net Sharpe}}.
+\]
+
+Slippage is the largest cost drag because each active overnight trade requires
+both a MOC entry and a MOO exit. The fixed Section 6.3 auction slippage rate is
+1.5 bps per leg, three times the 0.5 bps commission rate per leg. This explains
+why the signal-strength scaling rule is economically valuable: it reduces
+round-trip auction exposure on low-conviction days.
+
+Borrow is charged daily on short notional by tier: Tier A at 40 bps p.a.,
+Tier B at 200 bps p.a., and Tier C at 800 bps p.a. However, the aggregate borrow
+drag is small. The borrow audit shows that Tier A names represent 94.3\% of short
+notional at 250M, so the blended borrow rate remains close to the general
+collateral floor.
+
+\begin{table}[H]
+\centering
+\small
+\renewcommand{\arraystretch}{1.18}
+\setlength{\tabcolsep}{10pt}
+
+\begin{tabular}{lrrrr}
+\toprule
+\textbf{AUM} &
+\shortstack{\textbf{Gross}\\\textbf{Sharpe}} &
+\shortstack{\textbf{After}\\\textbf{Commission}} &
+\shortstack{\textbf{After}\\\textbf{Slippage}} &
+\shortstack{\textbf{Net}\\\textbf{Sharpe}} \\
+\midrule
+50M  & 0.519 & 0.447 & 0.233 & 0.225 \\
+\textbf{250M} & \textbf{0.768} & \textbf{0.718} & \textbf{0.567} & \textbf{0.562} \\
+1B   & 0.431 & 0.398 & 0.302 & 0.298 \\
+\bottomrule
+\end{tabular}
+
+\vspace{0.7em}
+
+\begin{tabular}{lrrr}
+\toprule
+\textbf{AUM} &
+\shortstack{\textbf{Commission}\\\textbf{Drag}} &
+\shortstack{\textbf{Slippage}\\\textbf{Drag}} &
+\shortstack{\textbf{Borrow}\\\textbf{Drag}} \\
+\midrule
+50M  & 0.072 & 0.214 & 0.008 \\
+\textbf{250M} & \textbf{0.050} & \textbf{0.151} & \textbf{0.005} \\
+1B   & 0.032 & 0.096 & 0.004 \\
+\bottomrule
+\end{tabular}
+
+\caption{Gross-to-net Sharpe decomposition and cost-drag attribution, 2010--2024.}
+\label{tab:step5_sharpe_degradation}
+
+\vspace{0.2em}
+\caption*{\footnotesize
+\textit{Note.} Commission is 0.5 bps per leg, auction slippage is 1.5 bps per leg,
+and borrow is charged daily on short notional by A/B/C tier.
+Source: \texttt{section6\_final\_sharpe\_degradation.csv}.}
+\end{table}
+
+%------------------------------------------------------------------
+\subsection*{Q4 \quad QuantStats tear-sheet, annual performance and stress regimes}
+\addcontentsline{toc}{subsection}{Q4 \quad QuantStats tear-sheet, annual performance and stress regimes}
+%------------------------------------------------------------------
+The QuantStats HTML tear-sheet for the final 250M net Random Forest strategy,
+benchmarked against \texttt{SP500\_TR} over 2010--2024, is submitted separately.
+The return series used for the tear-sheet is identical to the one underlying
+Table~\ref{tab:step5_headline} and is net of all Section 6.3 costs.
+
+Calendar years 2010--2017 have no Sharpe because the strategy has zero exposure
+during the expanding-window Random Forest warm-up period. This is a deployment
+rule rather than a data gap. Including these flat observations in the official
+2010--2024 window is conservative because it prevents the headline Sharpe from
+being inflated by excluding inactive years.
+
+\begin{table}[H]
+\centering
+\caption{Annual net Sharpe for the 250M Random Forest strategy, top/bottom 0.5\% equal-weight baskets, 5\% ADV cap, signal scaling and Section 6.3 costs. Source: \texttt{robustness\_diagnostics\_250M.csv}.}
+\label{tab:step5_annual_sharpe}
+\small
+\begin{tabular}{p{2.5cm} p{3.0cm} p{8.0cm}}
+\toprule
+\textbf{Year} & \textbf{Annual Net Sharpe} & \textbf{Interpretation} \\
+\midrule
+2010--2017 & -- & ML model warm-up; zero exposure by design \\
+2018 & +0.42 & Moderate positive \\
+2019 & +0.36 & Moderate positive \\
+2020 & +2.83 & Driven almost entirely by Q1 COVID overnight dispersion \\
+2021 & +0.45 & Moderate positive \\
+2022 & $-0.86$ & Adverse rate/inflation macro regime \\
+2023 & $-0.85$ & Persistent weakness; not a one-off event \\
+2024 & +0.95 & Recovery year, but with material intra-year drawdown \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The 2020 annual Sharpe of 2.83 is almost entirely driven by Q1. The 2020 Q1
+stress window has a 2.88 net Sharpe and +6.18\% net cumulative return,
+confirming that the strategy captured the extreme cross-sectional dispersion of
+the COVID shock in the overnight session. The remainder of 2020 is approximately
+flat, so the full-year number should not be interpreted as evidence of uniformly
+strong performance.
+
+Both 2022 and 2023 are negative, with annual Sharpes of $-0.86$ and $-0.85$.
+Two consecutive weak years are more informative than a single bad quarter. They
+suggest a persistent adverse macro regime, likely linked to rates and inflation,
+rather than one isolated event. The strategy is therefore not a universal crisis
+hedge. It performs best during abrupt cross-sectional dispersion shocks and
+struggles during prolonged directional macro environments.
+
+%------------------------------------------------------------------
+\subsection*{Q5 \quad Stress-window analysis}
+\addcontentsline{toc}{subsection}{Q5 \quad Stress-window analysis}
+%------------------------------------------------------------------
+
+The strategy's stress behaviour is sharply regime-dependent. It performs well
+when overnight cross-sectional dispersion rises abruptly, but it struggles in
+sustained directional macro regimes. Table~\ref{tab:step5_stress} reports the
+four canonical stress windows.
+
+\begin{table}[H]
+\centering
+\caption{Stress-window performance for the 250M Random Forest strategy, top/bottom 0.5\% equal-weight baskets, 5\% ADV cap, signal scaling and Section 6.3 costs. Source: \texttt{stress\_windows\_250M.csv}.}
+\label{tab:step5_stress}
+\small
+\begin{tabular}{p{2.2cm} rrr p{5.7cm}}
+\toprule
+\textbf{Window} & \textbf{Net Cumul.} & \textbf{Net Sharpe} & \textbf{Max DD} & \textbf{Diagnosis} \\
+\midrule
+2018 Q4 & +0.13\% & 0.14 & $-1.34\%$ & Flat / slightly positive; volatility spike did not generate persistent dispersion \\
+2020 Q1 & +6.18\% & 2.88 & $-1.65\%$ & Strong: abrupt COVID dislocation captured cleanly \\
+2022 Full & $-3.23\%$ & $-0.86$ & $-4.00\%$ & Weak: persistent rate/inflation regime \\
+2022 H2 & $-2.30\%$ & $-0.89$ & $-3.01\%$ & Continued adverse regime; underperformance not confined to H1 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+2018 Q4 produced elevated market volatility but not the structured overnight
+dispersion that the model exploits. The result is approximately flat. By
+contrast, 2020 Q1 is the strongest stress episode: the COVID shock created a
+sudden reordering of earnings expectations, sector outcomes and balance-sheet
+risk across names. This is the type of cross-sectional event environment where a
+score-based overnight strategy can perform well.
+
+The 2022 full-year and 2022 H2 results are both negative. The similarity between
+the two windows rules out the interpretation that 2022 weakness was driven only
+by one early-year shock. Instead, the adverse regime persisted through the second
+half of the year. The strategy did not mean-revert once the initial rate shock was
+priced in, which is an important limitation for portfolio allocation.
+
+\paragraph{Conclusion for Step 5.}
+The official 2010--2024 headline result for the 250M portfolio is a 2.03\% net
+annual return and a 0.562 net Sharpe after all fixed Section 6.3 costs. The
+strategy is economically meaningful but narrow: performance depends on extreme
+score-tail selection, signal scaling and capacity control. Slippage is the main
+gross-to-net drag, while borrow is small in aggregate. The strategy is best
+understood as an event-concentrated overnight alpha rather than a smooth daily
+return harvester.
+
+\paragraph{Reproducibility.}
+All Step 5 tables and the QuantStats HTML tear-sheet are generated
+deterministically by:
+\begin{center}
+\texttt{python run\_step5.py}
+\end{center}
+The Random Forest seed is fixed at \texttt{RANDOM\_SEED = 42}; the 250M return
+series used in the QuantStats report is identical to the series used in
+Table~\ref{tab:step5_headline}.
+```
 
 %==================================================================
 \appendix
