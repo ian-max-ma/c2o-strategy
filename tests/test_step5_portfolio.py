@@ -72,6 +72,7 @@ def test_daily_positions_are_dollar_neutral_and_respect_adv_cap() -> None:
         aum=1_000_000,
         score_col="score_baseline",
         basket_quantile=0.25,
+        weighting_scheme="equal",
         participation_cap=0.05,
     )
     day = pd.DataFrame(
@@ -170,6 +171,7 @@ def test_borrow_sensitivity_outputs_hard_exclusion_scenarios() -> None:
                     "score_baseline": 20 - i,
                     "target_raw": 0.001 * (1 if i < 10 else -1),
                     "adv20": 100_000_000.0,
+                    "vol20": 0.20,
                     "htb_tier": "C" if i in {0, 19} else "A",
                     "dsi": 0.15 if i in {18, 19} else 0.05,
                 }
@@ -209,6 +211,7 @@ def test_cap_sensitivity_compares_headline_and_loose_cap() -> None:
                     "score_baseline": 20 - i,
                     "target_raw": 0.001 * (1 if i < 10 else -1),
                     "adv20": 1_000_000.0,
+                    "vol20": 0.20,
                     "htb_tier": "A",
                 }
             )
@@ -246,6 +249,7 @@ def test_signal_strength_scaling_keeps_dates_and_reduces_exposure() -> None:
                     "score_baseline": score,
                     "target_raw": 0.001 * (1 if i >= 10 else -1),
                     "adv20": 100_000_000.0,
+                    "vol20": 0.20,
                     "htb_tier": "A",
                 }
             )
