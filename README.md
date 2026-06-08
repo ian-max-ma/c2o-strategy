@@ -10,7 +10,7 @@ Install dependencies:
 pip install -r requirements.txt
 ```
 
-Place the five coursework data files in `data/`:
+Place the coursework data files in `data/`:
 
 ```
 data/
@@ -19,6 +19,11 @@ data/
   sp500_constituents.parquet
   earnings_calendar.parquet
   short_interest_transfo.parquet
+  all_data.parquet
+  cheapness_scores.parquet
+  rolling_scores_downgrade.csv
+  rolling_scores_upgrade.csv
+  regime.parquet          (optional — used for regime IC diagnostics only)
 ```
 
 Then run:
@@ -26,6 +31,10 @@ Then run:
 ```bash
 python run_all.py
 ```
+
+This runs every stage from Step 1 through Step 5, including the Step 4
+evaluation, group and risk-feature ablations, Elastic Net and Random Forest
+tuning, and the 2024 tuning holdout.
 
 For a faster production-only rebuild without the report sanity tables:
 
@@ -46,6 +55,32 @@ python run_step5.py --mode report
 
 If the marker supplies post-2024 scores for held-out evaluation, Step 5 can be
 run without the development-window filter:
+
+```bash
+python run_step5.py --mode heldout
+```
+
+## Held-out evaluation (marker instructions)
+
+To evaluate on the 2025–2026 held-out window:
+
+1. Place the extended data files (covering through 2026) in `data/`, replacing
+   the 2010–2024 versions.
+
+2. In `run_step4.py`, change the two `last_pred_year=2024` arguments to
+   `last_pred_year=2026` (one for Elastic Net, one for Random Forest).
+   The loader in `step1_panel/loader.py` enforces `TRAIN_END` as a hard
+   cutoff — set `TRAIN_END = "2026-12-31"` in `config.py` to allow
+   the panel and scores to extend through 2026.  The model training loop
+   is expanding-window, so no future targets enter the training set.
+
+3. Run the full pipeline:
+
+```bash
+python run_all.py
+```
+
+4. Or, if only the held-out portfolio results are needed:
 
 ```bash
 python run_step5.py --mode heldout
