@@ -5,8 +5,8 @@ Usage:
     python run_all.py
 
 The default run rebuilds the report sanity outputs, the Step 1-3 panel, Step 4
-alpha scores and Step 5 portfolio outputs. Feature ablation and model tuning
-are optional because they are exploratory model-selection audits.
+alpha scores, evaluation, feature-ablation and model-tuning audits, and Step 5
+portfolio outputs.
 """
 
 from __future__ import annotations
@@ -21,13 +21,14 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent
 
 
-def run_stage(script_name: str, env: dict[str, str]) -> None:
+def run_stage(command: tuple[str, ...], env: dict[str, str]) -> None:
     """Run one pipeline script with the current Python interpreter."""
+    stage_name = " ".join(command)
     print("\n" + "=" * 78)
-    print(f"Running {script_name}")
+    print(f"Running {stage_name}")
     print("=" * 78)
     subprocess.run(
-        [sys.executable, script_name],
+        [sys.executable, *command],
         cwd=PROJECT_ROOT,
         env=env,
         check=True,
@@ -44,7 +45,7 @@ def main() -> None:
     parser.add_argument(
         "--include-tuning",
         action="store_true",
-        help="Also run Step 4 feature ablation and model-tuning audits.",
+        help=argparse.SUPPRESS,
     )
     args = parser.parse_args()
 
@@ -53,36 +54,32 @@ def main() -> None:
     mpl_cache.mkdir(parents=True, exist_ok=True)
     env.setdefault("MPLCONFIGDIR", str(mpl_cache))
 
-    scripts: list[str] = []
+    stages: list[tuple[str, ...]] = []
     if not args.skip_sanity:
-        scripts.extend(
+        stages.extend(
             [
-                "run_step1_sanity.py",
-                "run_step2_sanity.py",
+                ("run_step1_sanity.py",),
+                ("run_step2_sanity.py",),
             ]
         )
-    scripts.append("run_step2.py")
+    stages.append(("run_step2.py",))
     if not args.skip_sanity:
-        scripts.append("run_step3_sanity.py")
-    scripts.extend(
+        stages.append(("run_step3_sanity.py",))
+    stages.extend(
         [
-            "run_step4.py",
-            "run_step4_eval.py",
+            ("run_step4.py",),
+            ("run_step4_eval.py",),
+            ("run_step4_ablation.py", "--mode", "groups"),
+            ("run_step4_ablation.py", "--mode", "risk"),
+            ("run_step4_elastic_net_tuning.py",),
+            ("run_step4_random_forest_tuning.py",),
+            ("run_step4_tuning_holdout.py",),
+            ("run_step5.py",),
         ]
     )
-    if args.include_tuning:
-        scripts.extend(
-            [
-                "run_step4_ablation.py",
-                "run_step4_elastic_net_tuning.py",
-                "run_step4_random_forest_tuning.py",
-                "run_step4_tuning_holdout.py",
-            ]
-        )
-    scripts.append("run_step5.py")
 
-    for script in scripts:
-        run_stage(script, env)
+    for command in stages:
+        run_stage(command, env)
 
     print("\nPipeline complete. Step 5 outputs are in step5_portfolio/output/.")
 
