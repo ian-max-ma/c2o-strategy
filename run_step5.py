@@ -17,7 +17,9 @@ from config import (
     BASELINE_BASKET_QUANTILE,
     FINAL_BASKET_QUANTILE,
     FINAL_SCORE_COL,
+    QUANTSTATS_START_DATE,
     TRAIN_END,
+    TRAIN_START,
     USE_SIGNAL_SCALING,
     WEIGHTING_SCHEME,
 )
@@ -779,8 +781,9 @@ def main() -> None:
                 daily_by_aum["250M"],
                 tearsheet_path,
                 benchmark=benchmark,
-                title=f"C2O Step 5 250M {strategy_name} Strategy Net Returns vs SP500_TR",
+                title=f"C2O Step 5 250M {strategy_name} Strategy Net Returns vs SP500_TR (2010-2024)",
                 end_date=qs_end_date,
+                start_date=QUANTSTATS_START_DATE,
             )
             tearsheet_generated = True
             print(f"\nSaved QuantStats tear-sheet: {tearsheet_path}")

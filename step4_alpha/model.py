@@ -3,6 +3,8 @@ import pandas as pd
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.linear_model import ElasticNet
 
+from config import RANDOM_SEED
+
 
 def build_baseline_score(df: pd.DataFrame) -> pd.DataFrame:
     """Build the original transparent nine-feature baseline score."""
@@ -28,8 +30,8 @@ def fit_predict_elastic_net(
     target_col: str = "target_winsorized_demeaned",
     alpha: float = 0.0001,
     l1_ratio: float = 0.5,
-    random_state: int = 42,
-    max_train_rows: object = None,
+    random_state: int = RANDOM_SEED,
+    max_train_rows: int | None = None,
 ) -> pd.Series:
     """Fit Elastic Net and return predictions indexed like test_df."""
     train = train_df.dropna(subset=[target_col])
@@ -62,7 +64,8 @@ def expanding_window_elastic_net(
     last_pred_year: int = 2024,
     alpha: float = 0.0001,
     l1_ratio: float = 0.5,
-    max_train_rows: object = None,
+    max_train_rows: int | None = None,
+    random_state: int = RANDOM_SEED,
 ) -> pd.DataFrame:
     """Generate annual expanding-window Elastic Net predictions."""
     df = df.copy()
@@ -89,6 +92,7 @@ def expanding_window_elastic_net(
             target_col=target_col,
             alpha=alpha,
             l1_ratio=l1_ratio,
+            random_state=random_state,
             max_train_rows=max_train_rows,
         )
         df.loc[pred.index, "score_elastic_net"] = pred
@@ -103,9 +107,9 @@ def fit_predict_random_forest(
     n_estimators: int = 100,
     max_depth: int = 5,
     min_samples_leaf: int = 500,
-    max_features: object = "sqrt",
-    random_state: int = 42,
-    max_train_rows: object = 750_000,
+    max_features: str | float = "sqrt",
+    random_state: int = RANDOM_SEED,
+    max_train_rows: int | None = 750_000,
 ) -> pd.Series:
     """Fit Random Forest and return predictions indexed like test_df."""
     train = train_df.dropna(subset=[target_col])
@@ -140,8 +144,9 @@ def expanding_window_random_forest(
     n_estimators: int = 100,
     max_depth: int = 5,
     min_samples_leaf: int = 500,
-    max_features: object = "sqrt",
-    max_train_rows: object = 750_000,
+    max_features: str | float = "sqrt",
+    max_train_rows: int | None = 750_000,
+    random_state: int = RANDOM_SEED,
 ) -> pd.DataFrame:
     """Generate annual expanding-window Random Forest predictions."""
     df = df.copy()
@@ -170,6 +175,7 @@ def expanding_window_random_forest(
             max_depth=max_depth,
             min_samples_leaf=min_samples_leaf,
             max_features=max_features,
+            random_state=random_state,
             max_train_rows=max_train_rows,
         )
         df.loc[pred.index, "score_random_forest"] = pred

@@ -7,6 +7,7 @@ from config import (
     BORROW_TIER_A_BPS,
     BORROW_TIER_B_BPS,
     BORROW_TIER_C_BPS,
+    HTB_MODERATE_SI,
     ROUNDTRIP_BPS,
     TRADING_DAYS,
 )
@@ -71,6 +72,168 @@ def ic_summary(
         })
 
     return pd.DataFrame(rows).sort_values("mean_ic", ascending=False)
+
+
+def year_by_year_ic_summary(
+    df: pd.DataFrame,
+    score_cols: list[str],
+    target_col: str = "target_winsorized_demeaned",
+) -> pd.DataFrame:
+    """Summarise daily Spearman IC separately for each calendar year."""
+    data = df.copy()
+    data["date"] = pd.to_datetime(data["date"])
+    rows = []
+
+    for year, year_df in data.groupby(data["date"].dt.year, sort=True):
+        for score_col in score_cols:
+            if score_col not in year_df.columns:
+                continue
+            summary = ic_summary(
+                year_df,
+                score_cols=[score_col],
+                target_col=target_col,
+            ).iloc[0]
+            rows.append(
+                {
+                    "year": int(year),
+                    "score_col": score_col,
+                    "mean_ic": summary["mean_ic"],
+                    "std_ic": summary["std_ic"],
+                    "t_stat": summary["t_stat"],
+                    "n_days": int(summary["n_days"]),
+                    "n_observations": int(
+                        year_df[[score_col, target_col]].dropna().shape[0]
+                    ),
+                }
+            )
+
+    return pd.DataFrame(rows)
+
+
+def regime_ic_summary(
+    df: pd.DataFrame,
+    score_cols: list[str],
+    target_col: str = "target_winsorized_demeaned",
+    vol_col: str = "vol20",
+    short_interest_col: str = "dsi",
+    short_interest_threshold: float = HTB_MODERATE_SI,
+    supplied_regime_col: str = "regime",
+) -> pd.DataFrame:
+    """
+    Summarise IC across volatility, short-interest and stress regimes.
+
+    High/low volatility is defined from the median stock-level vol20 on each
+    date, split at the median daily value over the evaluation sample. Regime
+    subsets may overlap by design.
+    """
+    required = {"date", target_col}
+    missing = required - set(df.columns)
+    if missing:
+        raise KeyError(f"Missing columns for regime IC: {sorted(missing)}")
+
+    data = df.copy()
+    data["date"] = pd.to_datetime(data["date"])
+    regimes: list[tuple[str, str, str, pd.Series]] = []
+
+    if vol_col in data.columns:
+        daily_vol = data.groupby("date")[vol_col].median()
+        vol_threshold = float(daily_vol.median())
+        mapped_vol = data["date"].map(daily_vol)
+        regimes.extend(
+            [
+                (
+                    "volatility",
+                    "high_volatility_days",
+                    f"daily median {vol_col} > {vol_threshold:.8g}",
+                    mapped_vol > vol_threshold,
+                ),
+                (
+                    "volatility",
+                    "low_volatility_days",
+                    f"daily median {vol_col} <= {vol_threshold:.8g}",
+                    mapped_vol <= vol_threshold,
+                ),
+            ]
+        )
+
+    if short_interest_col in data.columns:
+        short_interest = pd.to_numeric(data[short_interest_col], errors="coerce")
+        regimes.extend(
+            [
+                (
+                    "short_interest",
+                    "high_short_interest_stocks",
+                    f"{short_interest_col} > {short_interest_threshold:.2%}",
+                    short_interest > short_interest_threshold,
+                ),
+                (
+                    "short_interest",
+                    "normal_short_interest_stocks",
+                    f"{short_interest_col} <= {short_interest_threshold:.2%}",
+                    short_interest <= short_interest_threshold,
+                ),
+            ]
+        )
+
+    regimes.extend(
+        [
+            (
+                "stress_period",
+                "2020_Q1",
+                "2020-01-01 through 2020-03-31",
+                data["date"].between("2020-01-01", "2020-03-31"),
+            ),
+            (
+                "stress_period",
+                "2022_rate_hike_bear_market",
+                "2022-01-01 through 2022-12-31",
+                data["date"].between("2022-01-01", "2022-12-31"),
+            ),
+        ]
+    )
+
+    if supplied_regime_col in data.columns:
+        for label in sorted(data[supplied_regime_col].dropna().unique()):
+            regimes.append(
+                (
+                    "supplied_regime",
+                    str(label),
+                    f"{supplied_regime_col} == {label}",
+                    data[supplied_regime_col].eq(label),
+                )
+            )
+
+    rows = []
+    for regime_type, regime, definition, mask in regimes:
+        regime_df = data[mask.fillna(False)]
+        if regime_df.empty:
+            continue
+        for score_col in score_cols:
+            if score_col not in regime_df.columns:
+                continue
+            summary = ic_summary(
+                regime_df,
+                score_cols=[score_col],
+                target_col=target_col,
+            ).iloc[0]
+            rows.append(
+                {
+                    "regime_type": regime_type,
+                    "regime": regime,
+                    "definition": definition,
+                    "score_col": score_col,
+                    "mean_ic": summary["mean_ic"],
+                    "std_ic": summary["std_ic"],
+                    "t_stat": summary["t_stat"],
+                    "n_days": int(summary["n_days"]),
+                    "n_observations": int(
+                        regime_df[[score_col, target_col]].dropna().shape[0]
+                    ),
+                }
+            )
+
+    return pd.DataFrame(rows)
+
 
 def decile_spread_summary(
     df: pd.DataFrame,
@@ -262,7 +425,7 @@ def cost_aware_decile_summary(
 
 def plot_decile_spread(
     decile_df: pd.DataFrame,
-    output_path: object,
+    output_path: str | Path,
     title: str = "Baseline Score Decile Spread",
     ) -> None:
     """
@@ -287,7 +450,7 @@ def plot_decile_spread(
 
 def plot_ic_summary(
     ic_df: pd.DataFrame,
-    output_path: object,
+    output_path: str | Path,
     title: str = "Mean Daily Spearman IC",
     n_top_features: int = 10,
 ) -> None:
@@ -329,6 +492,53 @@ def plot_ic_summary(
     plt.xlabel("Mean IC")
     plt.ylabel("Model / selected feature")
     plt.title(title)
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=200)
+    plt.close()
+
+
+def plot_year_by_year_ic(
+    yearly_ic: pd.DataFrame,
+    output_path: str | Path,
+    title: str = "Year-by-Year Mean Daily Spearman IC",
+) -> None:
+    """Plot annual mean IC lines for the baseline and two ML models."""
+    required = {"year", "score_col", "mean_ic"}
+    missing = required - set(yearly_ic.columns)
+    if missing:
+        raise KeyError(f"Missing columns for yearly IC plot: {sorted(missing)}")
+
+    model_styles = {
+        "score_baseline": ("Baseline", "tab:gray"),
+        "score_elastic_net": ("Elastic Net", "tab:blue"),
+        "score_random_forest": ("Random Forest", "tab:orange"),
+    }
+    plot_df = yearly_ic[yearly_ic["score_col"].isin(model_styles)].copy()
+    if plot_df.empty:
+        raise ValueError("No recognised model rows found for yearly IC plot.")
+
+    plt.figure(figsize=(10, 6))
+    for score_col, (label, color) in model_styles.items():
+        model_df = plot_df[plot_df["score_col"] == score_col].sort_values("year")
+        if model_df.empty:
+            continue
+        plt.plot(
+            model_df["year"],
+            model_df["mean_ic"],
+            marker="o",
+            linewidth=2,
+            label=label,
+            color=color,
+        )
+
+    years = sorted(plot_df["year"].unique())
+    plt.axhline(0.0, color="black", linewidth=1)
+    plt.xticks(years)
+    plt.xlabel("Year")
+    plt.ylabel("Mean daily Spearman IC")
+    plt.title(title)
+    plt.legend()
+    plt.grid(axis="y", alpha=0.25)
     plt.tight_layout()
     plt.savefig(output_path, dpi=200)
     plt.close()

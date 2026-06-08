@@ -1,4 +1,5 @@
 from pathlib import Path
+from config import RANDOM_SEED
 from step4_alpha.alpha import build_alpha_dataset, feature_audit_table
 from step4_alpha.model import (
     expanding_window_elastic_net,
@@ -25,6 +26,7 @@ if __name__ == "__main__":
         "score_baseline",
         "htb_tier",
         "htb_flag",
+        "vol20",
         "adv20",
         "dsi",
         "dtcn",
@@ -54,6 +56,7 @@ if __name__ == "__main__":
         last_pred_year=2024,
         alpha=0.000001,
         l1_ratio=0.5,
+        random_state=RANDOM_SEED,
     )
 
     df_ml = expanding_window_random_forest(
@@ -67,6 +70,7 @@ if __name__ == "__main__":
         min_samples_leaf=500,
         max_features="sqrt",
         max_train_rows=750_000,
+        random_state=RANDOM_SEED,
     )
 
     df_ml.to_parquet(ML_OUTPUT_PATH, index=False)

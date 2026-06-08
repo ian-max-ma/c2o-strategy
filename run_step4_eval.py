@@ -7,15 +7,23 @@ from step4_alpha.evaluation import (
     decile_spread_summary,
     plot_decile_spread,
     plot_ic_summary,
+    plot_year_by_year_ic,
+    regime_ic_summary,
+    year_by_year_ic_summary,
 )
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 INPUT_PATH = PROJECT_ROOT / "outputs" / "alpha_scores_ml.parquet"
 BASELINE_INPUT_PATH = PROJECT_ROOT / "outputs" / "alpha_scores.parquet"
+PANEL_INPUT_PATH = PROJECT_ROOT / "outputs" / "panel_step3.parquet"
+REGIME_INPUT_PATH = PROJECT_ROOT / "data" / "regime.parquet"
 
 OUTPUT_DIR = PROJECT_ROOT / "step4_alpha" / "eval_output"
 OUTPUT_PATH = OUTPUT_DIR / "ic_summary_ml.csv"
 BASELINE_FULL_IC_PATH = OUTPUT_DIR / "ic_baseline_full_sample.csv"
+YEARLY_IC_PATH = OUTPUT_DIR / "ic_by_year.csv"
+YEARLY_IC_PLOT_PATH = OUTPUT_DIR / "ic_by_year.png"
+REGIME_IC_PATH = OUTPUT_DIR / "ic_by_regime.csv"
 
 IC_PLOT_PATH = OUTPUT_DIR / "ic_summary_ml.png"
 
@@ -49,6 +57,31 @@ if __name__ == "__main__":
     else:
         df_model = df.copy()
 
+    if "vol20" not in df_model.columns:
+        panel_vol = pd.read_parquet(
+            PANEL_INPUT_PATH,
+            columns=["date", "ticker", "instrument_id", "vol20"],
+        )
+        df_model = df_model.merge(
+            panel_vol,
+            on=["date", "ticker", "instrument_id"],
+            how="left",
+            validate="one_to_one",
+        )
+
+    if REGIME_INPUT_PATH.exists():
+        supplied_regime = pd.read_parquet(
+            REGIME_INPUT_PATH,
+            columns=["date", "regime"],
+        )
+        supplied_regime["date"] = pd.to_datetime(supplied_regime["date"])
+        df_model = df_model.merge(
+            supplied_regime,
+            on="date",
+            how="left",
+            validate="many_to_one",
+        )
+
     print(f"Evaluation sample rows: {len(df_model):,}")
     print(f"Evaluation date range: {df_model['date'].min()} → {df_model['date'].max()}")
 
@@ -59,6 +92,27 @@ if __name__ == "__main__":
 
     print(f"Saved IC summary to: {OUTPUT_PATH}")
     print(ic.to_string(index=False))
+
+    diagnostic_score_cols = [
+        col
+        for col in [
+            "score_baseline",
+            "score_elastic_net",
+            "score_random_forest",
+        ]
+        if col in df_model.columns
+    ]
+    yearly_ic = year_by_year_ic_summary(df_model, diagnostic_score_cols)
+    yearly_ic.to_csv(YEARLY_IC_PATH, index=False)
+    plot_year_by_year_ic(yearly_ic, YEARLY_IC_PLOT_PATH)
+    print(f"\nSaved year-by-year IC diagnostics to: {YEARLY_IC_PATH}")
+    print(f"Saved year-by-year IC plot to: {YEARLY_IC_PLOT_PATH}")
+    print(yearly_ic.to_string(index=False))
+
+    regime_ic = regime_ic_summary(df_model, diagnostic_score_cols)
+    regime_ic.to_csv(REGIME_IC_PATH, index=False)
+    print(f"\nSaved regime IC diagnostics to: {REGIME_IC_PATH}")
+    print(regime_ic.to_string(index=False))
 
     # Full-sample baseline diagnostic.
     # This uses the baseline-only alpha file, so it is not restricted to the

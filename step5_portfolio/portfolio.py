@@ -35,7 +35,9 @@ from config import (
     SIGNAL_SCALING_QUANTILE,
     SLIPPAGE_BPS,
     TRADING_DAYS,
+    QUANTSTATS_START_DATE,
     TRAIN_END,
+    TRAIN_START,
     USE_BORROW_ADJUSTED_SHORT_SCORE,
     WEIGHTING_SCHEME,
 )
@@ -1520,23 +1522,42 @@ def make_quantstats_tearsheet(
     benchmark: pd.Series | None = None,
     title: str = "C2O Step 5 250M Strategy Net Returns vs SP500_TR",
     end_date: str | None = TRAIN_END,
+    start_date: str | None = QUANTSTATS_START_DATE,
 ) -> None:
-    """Create the required QuantStats HTML report for the 250M portfolio."""
+    """Create the required QuantStats HTML report for the 250M portfolio.
+
+    Parameters
+    ----------
+    start_date : str, optional
+        Earliest date to include in the tear-sheet (default: TRAIN_START).
+        Passed explicitly so the header always shows the full development
+        window "21 Jan, 2010 - 31 Dec, 2024" rather than the first
+        active-trading date (2018), which is what QuantStats' default
+        match_dates=True behaviour would otherwise produce.
+    """
     import quantstats as qs
 
     returns = daily.set_index("date")["net_return"].sort_index()
     returns.index = pd.to_datetime(returns.index)
+    if start_date is not None:
+        returns = returns[returns.index >= pd.Timestamp(start_date)]
     if end_date is not None:
         returns = returns[returns.index <= pd.Timestamp(end_date)]
     if benchmark is not None:
         benchmark = benchmark.sort_index()
         benchmark.index = pd.to_datetime(benchmark.index)
+        if start_date is not None:
+            benchmark = benchmark[benchmark.index >= pd.Timestamp(start_date)]
         if end_date is not None:
             benchmark = benchmark[benchmark.index <= pd.Timestamp(end_date)]
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    # match_dates=False prevents QuantStats from trimming the series to the
+    # first nonzero return date.  The warm-up zeros (2010-2017) are kept so
+    # the reported window matches the official development window 2010-2024.
     qs.reports.html(
         returns,
         benchmark=benchmark,
         output=str(output_path),
         title=title,
+        match_dates=False,
     )

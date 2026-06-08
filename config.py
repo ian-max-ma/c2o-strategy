@@ -88,7 +88,7 @@ BORROW_SCORE_PENALTY = {
 
 # QuantStats
 QUANTSTATS_AUM_LABEL = "250M"
-QUANTSTATS_START_DATE = "2010-01-01"
+QUANTSTATS_START_DATE = "2010-01-21"  # First full trading day in the series
 QUANTSTATS_END_DATE = TRAIN_END
 
 # Reproducibility

@@ -370,6 +370,7 @@ def build_alpha_dataset() -> tuple[pd.DataFrame, list[str]]:
         "target_rank",
         "htb_tier",
         "htb_flag",
+        "vol20",
         "adv20",
         "dsi",
         "dtcn",
