@@ -22,6 +22,18 @@ from config import (
     WEIGHTING_SCHEME,
 )
 from step1_panel.loader import load_sp500_tr
+from step5_portfolio.robustness_extended import (
+    borrow_contribution_table,
+    cap_bite_audit,
+    hard_exclusion_robustness_table,
+    plot_annual_net_sharpe,
+    plot_rolling_worst_windows,
+    plot_top5_concentration,
+    position_size_audit_table,
+    reporting_integrity_table,
+    slippage_reconciliation_table,
+    stat_robustness_table,
+)
 from step5_portfolio.portfolio import (
     add_borrow_adjusted_score,
     add_daily_signal_strength,
@@ -684,6 +696,65 @@ def main() -> None:
     cap_sensitivity_path = OUTPUT_DIR / "cap_sensitivity.csv"
     cap_sensitivity.to_csv(cap_sensitivity_path, index=False)
     print(f"Saved cap sensitivity diagnostic: {cap_sensitivity_path}")
+
+    # ------------------------------------------------------------------
+    # §7.2  Statistical robustness table
+    # ------------------------------------------------------------------
+    active_start_str = str(common_oos_start.date())
+    stat_rob = stat_robustness_table(daily_by_aum["250M"], active_start=active_start_str)
+    stat_rob_path = OUTPUT_DIR / "stat_robustness_table_250M.csv"
+    stat_rob.to_csv(stat_rob_path, index=False)
+    print(f"Saved §7.2 statistical robustness table: {stat_rob_path}")
+
+    # §7.2 Robustness figures
+    figures_dir = OUTPUT_DIR / "assets"
+    figures_dir.mkdir(parents=True, exist_ok=True)
+    plot_rolling_worst_windows(daily_by_aum["250M"], figures_dir / "fig_rolling_worst_windows_250M.png", active_start=active_start_str)
+    plot_top5_concentration(daily_by_aum["250M"], figures_dir / "fig_top5_return_concentration_250M.png", active_start=active_start_str)
+    plot_annual_net_sharpe(daily_by_aum["250M"], figures_dir / "fig_annual_net_sharpe_250M.png", active_start=active_start_str)
+
+    # ------------------------------------------------------------------
+    # §7.3  Capacity and execution honesty tables
+    # ------------------------------------------------------------------
+    cap_bite = cap_bite_audit(cap_sensitivity)
+    cap_bite.to_csv(OUTPUT_DIR / "cap_bite_audit_250M.csv", index=False)
+    print(f"Saved §7.3 cap-bite audit: {OUTPUT_DIR / 'cap_bite_audit_250M.csv'}")
+
+    pos_audit_table = position_size_audit_table(position_audit, AUM_LEVELS)
+    pos_audit_table.to_csv(OUTPUT_DIR / "position_size_audit_table.csv", index=False)
+    print(f"Saved §7.3 position-size audit table: {OUTPUT_DIR / 'position_size_audit_table.csv'}")
+
+    slip_recon = slippage_reconciliation_table(cost_schedule_summary())
+    slip_recon.to_csv(OUTPUT_DIR / "slippage_reconciliation_table.csv", index=False)
+    print(f"Saved §7.3 slippage reconciliation: {OUTPUT_DIR / 'slippage_reconciliation_table.csv'}")
+
+    # ------------------------------------------------------------------
+    # §7.4  Borrow honesty tables
+    # ------------------------------------------------------------------
+    borrow_contrib = borrow_contribution_table(borrow_sensitivity, borrow_audit)
+    borrow_contrib.to_csv(OUTPUT_DIR / "borrow_contribution_table_250M.csv", index=False)
+    print(f"Saved §7.4 borrow contribution table: {OUTPUT_DIR / 'borrow_contribution_table_250M.csv'}")
+
+    hard_excl = hard_exclusion_robustness_table(borrow_sensitivity)
+    hard_excl.to_csv(OUTPUT_DIR / "hard_exclusion_robustness_table_250M.csv", index=False)
+    print(f"Saved §7.4 hard-exclusion robustness table: {OUTPUT_DIR / 'hard_exclusion_robustness_table_250M.csv'}")
+
+    # ------------------------------------------------------------------
+    # §7.5  Reporting integrity checklist
+    # ------------------------------------------------------------------
+    import config as _cfg
+    integrity = reporting_integrity_table({
+        "TRAIN_START": _cfg.TRAIN_START, "TRAIN_END": _cfg.TRAIN_END,
+        "RANDOM_SEED": _cfg.RANDOM_SEED,
+        "FINAL_SCORE_COL": _cfg.FINAL_SCORE_COL,
+        "FINAL_BASKET_QUANTILE": _cfg.FINAL_BASKET_QUANTILE,
+        "PARTICIPATION_CAP": _cfg.PARTICIPATION_CAP,
+        "WEIGHTING_SCHEME": _cfg.WEIGHTING_SCHEME,
+        "AUM_LEVELS": _cfg.AUM_LEVELS,
+        "USE_SIGNAL_SCALING": _cfg.USE_SIGNAL_SCALING,
+    })
+    integrity.to_csv(OUTPUT_DIR / "reporting_integrity_checklist.csv", index=False)
+    print(f"Saved §7.5 reporting integrity checklist")
 
     benchmark = None
     try:

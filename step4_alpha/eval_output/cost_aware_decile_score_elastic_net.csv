@@ -1,0 +1,2 @@
+score_col,target_col,n_days,mean_gross_return,mean_trading_cost_return,mean_borrow_cost_return,mean_net_return,gross_ann_return,net_ann_return,gross_sharpe,net_sharpe
+score_elastic_net,target_raw,1760,0.00018748365968557752,0.00040000000000000013,1.7017287343571568e-05,-0.00022953362765799405,0.047245882240765535,-0.0578424741698145,0.8887086297993149,-1.0880357739565174

@@ -1,0 +1,4 @@
+cost_assumption,role,magnitude,interpretation
+Square-root impact at 5% ADV cap (Section 3.3),Capacity stress / upper-bound impact,17.7–39.4 bps per side,"Conservative upper bound when orders are near the participation cap. Derived from σ_daily × k × √f with k=0.7, f=0.05."
+Flat auction-cost schedule (Section 6.3),Headline net backtest cost,0.5 bps commission + 1.5 bps slippage per leg (4 bps round trip),"Specified in the coursework brief Table 6.1. Represents a small fraction of auction volume, not the cap-level upper bound. The two models are at different levels of pessimism; the square-root model applies when orders approach the cap."
+Borrow cost schedule (Section 3.4),Short-leg financing cost,Tier A 40 bps / Tier B 200 bps / Tier C 800 bps annualised,Applied daily on short notional according to HTB tier (dsi>10% or dtcn>10 → Tier B; dsi>20% or dtcn>20 → Tier C).

@@ -1,0 +1,5 @@
+bucket,avg_daily_gross_bps_contribution,annualised_gross_bps_contribution,share_of_short_side_gross_pnl,avg_short_notional_share,interpretation
+Short positions with dsi > 10%,-0.8909,-224.51,43.2%,3.9%,Negative or near-zero contribution from high-SI shorts.
+Borrow cost attribution — Tier A,,,n/a,94.3%,"Tier A = 73.5% of total borrow cost, 94.3% of short notional."
+Borrow cost attribution — Tier B,,,n/a,5.4%,"Tier B = 20.8% of total borrow cost, 5.4% of short notional."
+Borrow cost attribution — Tier C,,,n/a,0.4%,"Tier C = 5.7% of total borrow cost, 0.4% of short notional."

@@ -1,0 +1,18 @@
+item,reported_setting
+Data window,2010-01-01 to 2024-12-31
+Held-out window,2025–2026 — never read during model development
+Main Step 5 command,python run_step5.py
+Full pipeline command,python run_all.py
+Figure + table output directory,step5_portfolio/output/
+Final strategy AUM levels,"$50M, $250M, $1000M"
+Main reported AUM,$250M
+Basket rule,Top/bottom 0.5% per side
+Portfolio weighting,equal
+Participation cap,5% of ADV20 per stock per side
+Cost schedule,0.5 bps commission + 1.5 bps slippage per leg; tiered borrow A/B/C
+Random seed (all steps),42
+Random Forest spec,"100 trees, max depth 5, min leaf 500, sqrt feature subsampling"
+Elastic Net spec,"alpha=1e-6, l1_ratio=0.5"
+OOS training design,"Expanding-window yearly retraining; train on years < Y, predict year Y"
+Signal scaling,True
+Final score model,score_random_forest

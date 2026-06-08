@@ -1,0 +1,5 @@
+variant,aum_label,net_sharpe,net_ann_return,avg_gross_exposure,pct_days_capacity_constrained,max_single_name_participation,n_days_cap_breach,interpretation
+5% ADV cap (submitted),250M,0.7960519313768142,0.04256648047720746,0.1547807830603846,0.48779102782509937,0.05000000000000001,0,Required ADV cap from the brief
+5% ADV cap (submitted),1B,0.416345526874496,0.010576241914724616,0.04694844494144719,0.49687677455990914,0.05000000000000001,0,Required ADV cap from the brief
+No cap (loose reference),250M,0.293603340693685,0.02260256231269353,0.3491315045862369,0.30096536059057355,1.0,0,Loose-cap reference — shows cap is binding
+No cap (loose reference),1B,0.313721628621911,0.023220548622018056,0.30328229640095855,0.3736513344690517,1.0,0,Loose-cap reference — shows cap is binding

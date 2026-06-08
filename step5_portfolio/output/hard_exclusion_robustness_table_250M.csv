@@ -1,0 +1,4 @@
+strategy_version,net_sharpe,net_ann_return,gross_sharpe,avg_gross_exposure,borrow_cost_ann_drag,interpretation,sharpe_vs_baseline
+Baseline: tiered borrow proxy (submitted),0.7960519313768142,0.04256648047720746,1.1059706670432115,0.1547807830603846,0.00039732363224001684,Submitted borrow-cost treatment,0.0
+Hard exclude Tier C names from short book,0.8137844784761137,0.04285180966497193,1.1248105943375672,0.1533061775267199,0.0003734843200723709,Robustness check: hard exclusion of high-SI names,0.0177
+Hard exclude Tier B + C names from short book,1.1924304873596179,0.05927940597856196,1.5225631880334567,0.15396509778058537,0.0003079301955611708,Robustness check: hard exclusion of high-SI names,0.3964

@@ -1,0 +1,17 @@
+diagnostic,value,interpretation
+standard_net_sharpe_active_window,0.8061352415846121,Annualised daily net Sharpe over active ML window (2018–2024). Zero risk-free rate.
+lo_adjusted_net_sharpe_lag5,0.7734641010624566,Lo (2002) autocorrelation-adjusted Sharpe using lags 1–5. Close to the standard Sharpe → daily autocorrelation does not mechanically explain the result.
+lag1_daily_autocorrelation,-0.01777347143008056,First-order daily autocorrelation of net returns. Negative → no positive return smoothing; Sharpe is not inflated by autocorrelation.
+worst_rolling_3m_return,-0.050004395059009665,Worst 63-trading-day compounded net return (window ending 2024-05-23).
+worst_rolling_6m_return,-0.05130082599987418,Worst 126-trading-day compounded net return (window ending 2024-08-26).
+worst_rolling_12m_return,-0.04469140356301582,Worst 252-trading-day compounded net return (window ending 2022-10-28).
+top_5pct_days_sum_n89,0.7716562257472933,Arithmetic sum of the best 89 daily net returns (top 5% of 1761 active trading days).
+total_arithmetic_net_return_sum,0.3012264233787834,Arithmetic sum of all active-window daily net returns.
+top_5pct_share_of_total_return,2.5617149288957237,Top-5% days contribute 2.56× total arithmetic return. Alpha is event-concentrated rather than smoothly harvested.
+annual_net_sharpe_2018,0.42506287711027085,Net Sharpe for calendar year 2018.
+annual_net_sharpe_2019,0.3589289156766498,Net Sharpe for calendar year 2019.
+annual_net_sharpe_2020,2.5869556385253003,Net Sharpe for calendar year 2020.
+annual_net_sharpe_2021,0.4646593148473829,Net Sharpe for calendar year 2021.
+annual_net_sharpe_2022,-0.915704817876702,Net Sharpe for calendar year 2022.
+annual_net_sharpe_2023,-0.9139448628628792,Net Sharpe for calendar year 2023.
+annual_net_sharpe_2024,0.7650138911103822,Net Sharpe for calendar year 2024.

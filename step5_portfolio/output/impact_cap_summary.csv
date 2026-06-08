@@ -1,28 +1,28 @@
 aum_label,adv_bucket,median_adv20,median_annual_vol20,participation_cap,is_headline_cap,median_sqrt_impact_bps,diagnostic_interpretation
-50M,low_adv,34923695.95,0.2608047362184659,0.01,False,11.50040787969768,Lower participation sensitivity diagnostic.
-50M,mid_adv,136378762.2695,0.33548553263897885,0.01,False,14.793521463713015,Lower participation sensitivity diagnostic.
-50M,high_adv,593893205.4755,0.42360434517472084,0.01,False,18.67919586031125,Lower participation sensitivity diagnostic.
-50M,low_adv,34923695.95,0.2608047362184659,0.025,False,18.183741460396185,Lower participation sensitivity diagnostic.
-50M,mid_adv,136378762.2695,0.33548553263897885,0.025,False,23.39061121996054,Lower participation sensitivity diagnostic.
-50M,high_adv,593893205.4755,0.42360434517472084,0.025,False,29.534401889485967,Lower participation sensitivity diagnostic.
-50M,low_adv,34923695.95,0.2608047362184659,0.05,True,25.715693787978235,5% is an aggressive upper bound under the square-root diagnostic; headline backtest costs follow the fixed Brief Section 6.3 schedule.
-50M,mid_adv,136378762.2695,0.33548553263897885,0.05,True,33.079319619464485,5% is an aggressive upper bound under the square-root diagnostic; headline backtest costs follow the fixed Brief Section 6.3 schedule.
-50M,high_adv,593893205.4755,0.42360434517472084,0.05,True,41.767951708688614,5% is an aggressive upper bound under the square-root diagnostic; headline backtest costs follow the fixed Brief Section 6.3 schedule.
-250M,low_adv,34923695.95,0.2608047362184659,0.01,False,11.50040787969768,Lower participation sensitivity diagnostic.
-250M,mid_adv,136378762.2695,0.33548553263897885,0.01,False,14.793521463713015,Lower participation sensitivity diagnostic.
-250M,high_adv,593893205.4755,0.42360434517472084,0.01,False,18.67919586031125,Lower participation sensitivity diagnostic.
-250M,low_adv,34923695.95,0.2608047362184659,0.025,False,18.183741460396185,Lower participation sensitivity diagnostic.
-250M,mid_adv,136378762.2695,0.33548553263897885,0.025,False,23.39061121996054,Lower participation sensitivity diagnostic.
-250M,high_adv,593893205.4755,0.42360434517472084,0.025,False,29.534401889485967,Lower participation sensitivity diagnostic.
-250M,low_adv,34923695.95,0.2608047362184659,0.05,True,25.715693787978235,5% is an aggressive upper bound under the square-root diagnostic; headline backtest costs follow the fixed Brief Section 6.3 schedule.
-250M,mid_adv,136378762.2695,0.33548553263897885,0.05,True,33.079319619464485,5% is an aggressive upper bound under the square-root diagnostic; headline backtest costs follow the fixed Brief Section 6.3 schedule.
-250M,high_adv,593893205.4755,0.42360434517472084,0.05,True,41.767951708688614,5% is an aggressive upper bound under the square-root diagnostic; headline backtest costs follow the fixed Brief Section 6.3 schedule.
-1B,low_adv,34923695.95,0.2608047362184659,0.01,False,11.50040787969768,Lower participation sensitivity diagnostic.
-1B,mid_adv,136378762.2695,0.33548553263897885,0.01,False,14.793521463713015,Lower participation sensitivity diagnostic.
-1B,high_adv,593893205.4755,0.42360434517472084,0.01,False,18.67919586031125,Lower participation sensitivity diagnostic.
-1B,low_adv,34923695.95,0.2608047362184659,0.025,False,18.183741460396185,Lower participation sensitivity diagnostic.
-1B,mid_adv,136378762.2695,0.33548553263897885,0.025,False,23.39061121996054,Lower participation sensitivity diagnostic.
-1B,high_adv,593893205.4755,0.42360434517472084,0.025,False,29.534401889485967,Lower participation sensitivity diagnostic.
-1B,low_adv,34923695.95,0.2608047362184659,0.05,True,25.715693787978235,5% is an aggressive upper bound under the square-root diagnostic; headline backtest costs follow the fixed Brief Section 6.3 schedule.
-1B,mid_adv,136378762.2695,0.33548553263897885,0.05,True,33.079319619464485,5% is an aggressive upper bound under the square-root diagnostic; headline backtest costs follow the fixed Brief Section 6.3 schedule.
-1B,high_adv,593893205.4755,0.42360434517472084,0.05,True,41.767951708688614,5% is an aggressive upper bound under the square-root diagnostic; headline backtest costs follow the fixed Brief Section 6.3 schedule.
+50M,low_adv,45957565.25,0.21506541196631915,0.01,False,9.483493261242252,Lower participation sensitivity diagnostic.
+50M,mid_adv,275492203.625,0.24254064115609156,0.01,False,10.695036988752927,Lower participation sensitivity diagnostic.
+50M,high_adv,4622471935.16175,0.5798823109769229,0.01,False,25.570406408839304,Lower participation sensitivity diagnostic.
+50M,low_adv,45957565.25,0.21506541196631915,0.025,False,14.99471944019187,Lower participation sensitivity diagnostic.
+50M,mid_adv,275492203.625,0.24254064115609156,0.025,False,16.910338272103935,Lower participation sensitivity diagnostic.
+50M,high_adv,4622471935.16175,0.5798823109769229,0.025,False,40.43036247404943,Lower participation sensitivity diagnostic.
+50M,low_adv,45957565.25,0.21506541196631915,0.05,True,21.205735596298847,5% is an aggressive upper bound under the square-root diagnostic; headline backtest costs follow the fixed Brief Section 6.3 schedule.
+50M,mid_adv,275492203.625,0.24254064115609156,0.05,True,23.914829728726197,5% is an aggressive upper bound under the square-root diagnostic; headline backtest costs follow the fixed Brief Section 6.3 schedule.
+50M,high_adv,4622471935.16175,0.5798823109769229,0.05,True,57.17716694246096,5% is an aggressive upper bound under the square-root diagnostic; headline backtest costs follow the fixed Brief Section 6.3 schedule.
+250M,low_adv,45957565.25,0.21506541196631915,0.01,False,9.483493261242252,Lower participation sensitivity diagnostic.
+250M,mid_adv,275492203.625,0.24254064115609156,0.01,False,10.695036988752927,Lower participation sensitivity diagnostic.
+250M,high_adv,4622471935.16175,0.5798823109769229,0.01,False,25.570406408839304,Lower participation sensitivity diagnostic.
+250M,low_adv,45957565.25,0.21506541196631915,0.025,False,14.99471944019187,Lower participation sensitivity diagnostic.
+250M,mid_adv,275492203.625,0.24254064115609156,0.025,False,16.910338272103935,Lower participation sensitivity diagnostic.
+250M,high_adv,4622471935.16175,0.5798823109769229,0.025,False,40.43036247404943,Lower participation sensitivity diagnostic.
+250M,low_adv,45957565.25,0.21506541196631915,0.05,True,21.205735596298847,5% is an aggressive upper bound under the square-root diagnostic; headline backtest costs follow the fixed Brief Section 6.3 schedule.
+250M,mid_adv,275492203.625,0.24254064115609156,0.05,True,23.914829728726197,5% is an aggressive upper bound under the square-root diagnostic; headline backtest costs follow the fixed Brief Section 6.3 schedule.
+250M,high_adv,4622471935.16175,0.5798823109769229,0.05,True,57.17716694246096,5% is an aggressive upper bound under the square-root diagnostic; headline backtest costs follow the fixed Brief Section 6.3 schedule.
+1B,low_adv,45957565.25,0.21506541196631915,0.01,False,9.483493261242252,Lower participation sensitivity diagnostic.
+1B,mid_adv,275492203.625,0.24254064115609156,0.01,False,10.695036988752927,Lower participation sensitivity diagnostic.
+1B,high_adv,4622471935.16175,0.5798823109769229,0.01,False,25.570406408839304,Lower participation sensitivity diagnostic.
+1B,low_adv,45957565.25,0.21506541196631915,0.025,False,14.99471944019187,Lower participation sensitivity diagnostic.
+1B,mid_adv,275492203.625,0.24254064115609156,0.025,False,16.910338272103935,Lower participation sensitivity diagnostic.
+1B,high_adv,4622471935.16175,0.5798823109769229,0.025,False,40.43036247404943,Lower participation sensitivity diagnostic.
+1B,low_adv,45957565.25,0.21506541196631915,0.05,True,21.205735596298847,5% is an aggressive upper bound under the square-root diagnostic; headline backtest costs follow the fixed Brief Section 6.3 schedule.
+1B,mid_adv,275492203.625,0.24254064115609156,0.05,True,23.914829728726197,5% is an aggressive upper bound under the square-root diagnostic; headline backtest costs follow the fixed Brief Section 6.3 schedule.
+1B,high_adv,4622471935.16175,0.5798823109769229,0.05,True,57.17716694246096,5% is an aggressive upper bound under the square-root diagnostic; headline backtest costs follow the fixed Brief Section 6.3 schedule.
