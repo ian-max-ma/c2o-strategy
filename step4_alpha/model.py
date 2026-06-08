@@ -29,7 +29,7 @@ def fit_predict_elastic_net(
     alpha: float = 0.0001,
     l1_ratio: float = 0.5,
     random_state: int = 42,
-    max_train_rows: int | None = None,
+    max_train_rows: object = None,
 ) -> pd.Series:
     """Fit Elastic Net and return predictions indexed like test_df."""
     train = train_df.dropna(subset=[target_col])
@@ -62,7 +62,7 @@ def expanding_window_elastic_net(
     last_pred_year: int = 2024,
     alpha: float = 0.0001,
     l1_ratio: float = 0.5,
-    max_train_rows: int | None = None,
+    max_train_rows: object = None,
 ) -> pd.DataFrame:
     """Generate annual expanding-window Elastic Net predictions."""
     df = df.copy()
@@ -103,9 +103,9 @@ def fit_predict_random_forest(
     n_estimators: int = 100,
     max_depth: int = 5,
     min_samples_leaf: int = 500,
-    max_features: str | float = "sqrt",
+    max_features: object = "sqrt",
     random_state: int = 42,
-    max_train_rows: int | None = 750_000,
+    max_train_rows: object = 750_000,
 ) -> pd.Series:
     """Fit Random Forest and return predictions indexed like test_df."""
     train = train_df.dropna(subset=[target_col])
@@ -140,8 +140,8 @@ def expanding_window_random_forest(
     n_estimators: int = 100,
     max_depth: int = 5,
     min_samples_leaf: int = 500,
-    max_features: str | float = "sqrt",
-    max_train_rows: int | None = 750_000,
+    max_features: object = "sqrt",
+    max_train_rows: object = 750_000,
 ) -> pd.DataFrame:
     """Generate annual expanding-window Random Forest predictions."""
     df = df.copy()

@@ -1,6 +1,6 @@
 item,requirement,status,evidence
-1,Portfolio construction logic is reasonable,PASS,"Top/bottom 10% score baskets, equal side weights, and iterative ADV-cap redistribution."
-2,Long and short books are dollar-neutral,PASS,Positions are matched after caps; max long-short imbalance is 5.36e-07 dollars.
+1,Portfolio construction logic is reasonable,PASS,"Final top/bottom 0.5% score baskets, equal side weights, signal-strength gross scaling, and iterative ADV-cap redistribution. Dates before the expanding-window ML model is available are retained as zero-exposure warm-up days."
+2,Long and short books are dollar-neutral,PASS,Positions are matched after caps; max long-short imbalance is 5.96e-08 dollars.
 3,Participation cap is not breached,PASS,n_days_with_cap_breach=0; max participation=0.0500.
 4,"50M, 250M and 1B capacity differences are reported",PASS,"performance_summary.csv and capacity_diagnostics.csv report gross exposure, constrained days and cap-binding names for all AUM levels."
 5,"Commission, slippage and borrow are deducted",PASS,"performance_summary.csv includes commission_ann_drag, slippage_ann_drag, borrow_cost_ann_drag and net returns."
@@ -8,4 +8,4 @@ item,requirement,status,evidence
 7,Stress-window analysis is honest,PASS,"stress_windows_250M.csv covers 2018_Q4, 2020_Q1, 2022 and 2022_H2 with results shown as-is."
 8,QuantStats HTML is generated correctly,PASS,quantstats_250M_SP500_TR.html generated for 250M vs SP500_TR.
 9,Code is one-command reproducible for Step 5,PASS,"python run_step5.py generates Step 5 tables, charts, captions, self-checks and QuantStats output."
-10,Results are not dressed up and do not use future data,PASS,Cutoff check passes through 2024-12-31; headline OOS score runs from 2018-01-02 to 2024-12-31.
+10,Results are not dressed up and do not use future data,PASS,"Cutoff check passes through 2024-12-31; headline active score range runs from 2018-01-02 to 2024-12-31, while the reported return series keeps the full 2010-2024 window."

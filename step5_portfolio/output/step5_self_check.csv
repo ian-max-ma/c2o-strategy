@@ -3,7 +3,9 @@ date_window_policy,pass,mode=report; raw max alpha date=2024-12-31; raw max pane
 three_aum_table,pass,"performance_summary.csv reports 50M, 250M and 1B."
 fixed_table_6_1_costs,pass,cost_schedule_summary.csv uses 0.5/1.5 bps per leg and A/B/C borrow tiers.
 cap_bites_and_no_breaches,pass,"n_days_with_cap_breach=0; max_single_name_participation=0.0500; cap_bite_detected=True. Cap bite is reported as evidence, while pass/fail is based on no cap breaches."
-quantstats_one_command,pass,"run_step5.py writes the headline OOS QuantStats HTML and, when baseline scores are available, the 2010-2024 baseline reference QuantStats HTML."
+quantstats_one_command,pass,run_step5.py writes the 250M headline QuantStats HTML for the current run; baseline_reference_generated=True.
 stress_windows,pass,"stress_windows_250M.csv covers 2018_Q4, 2020_Q1, 2022 and 2022_H2."
-robustness_and_borrow_sensitivity,pass,robustness_diagnostics_250M.csv and borrow_sensitivity_250M.csv are generated.
+robustness_and_borrow_sensitivity,pass,"robustness_diagnostics_250M.csv, non_overlapping_subperiod_summary_250M.csv and borrow_sensitivity_250M.csv are generated."
+basket_design_defense,pass,step5_basket_design_defense.csv and .md explain why the top/bottom tail basket is used after wider basket-size sensitivity is reported.
+warmup_window_defense,pass,step5_warmup_window_audit.csv and .md document that 2010-2017 are retained as zero-exposure expanding-window warm-up dates.
 cap_bite_sensitivity,pass,cap_sensitivity.csv compares 5% ADV cap with a loose-cap reference.

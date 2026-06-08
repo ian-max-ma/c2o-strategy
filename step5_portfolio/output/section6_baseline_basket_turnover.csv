@@ -1,0 +1,4 @@
+analysis_window,score_col,aum_label,avg_n_long,avg_n_short,pct_days_with_positions,avg_n_long_active,avg_n_short_active,avg_daily_turnover,avg_roundtrip_turnover,avg_daily_turnover_active,avg_gross_exposure_active,basket_quantile_each_side,weighting_scheme
+2010-2024 baseline reference under Section 6.3 costs,score_baseline,50M,95.0914164230667,95.0914164230667,1.0,95.0914164230667,95.0914164230667,1.999376864591545,1.999376864591545,1.999376864591545,0.9996884322957725,0.1,equal
+2010-2024 baseline reference under Section 6.3 costs,score_baseline,250M,95.0914164230667,95.0914164230667,1.0,95.0914164230667,95.0914164230667,1.6661935772844254,1.6661935772844254,1.6661935772844254,0.8330967886422127,0.1,equal
+2010-2024 baseline reference under Section 6.3 costs,score_baseline,1B,95.0914164230667,95.0914164230667,1.0,95.0914164230667,95.0914164230667,0.7271014271913419,0.7271014271913419,0.7271014271913419,0.3635507135956709,0.1,equal

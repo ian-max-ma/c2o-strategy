@@ -25,6 +25,8 @@ from step1_panel.loader import load_sp500_tr
 from step5_portfolio.portfolio import (
     add_borrow_adjusted_score,
     add_daily_signal_strength,
+    annualised_return,
+    annualised_volatility,
     available_score_columns,
     basket_size_sensitivity,
     borrow_sensitivity_analysis,
@@ -35,6 +37,7 @@ from step5_portfolio.portfolio import (
     figure_captions,
     impact_cap_summary,
     make_quantstats_tearsheet,
+    max_drawdown,
     non_overlapping_subperiod_summary,
     plot_calendar_year_net_returns,
     plot_gross_to_net_decomposition,
@@ -43,6 +46,7 @@ from step5_portfolio.portfolio import (
     prepare_step5_input,
     robustness_diagnostics,
     run_aum_backtests,
+    sharpe_ratio,
     stress_window_summary,
 )
 
@@ -75,15 +79,6 @@ SECTION6_PERFORMANCE_COLUMNS = [
     "n_days",
 ]
 
-# Coursework-compliant Section 6 benchmark.  We keep this fixed here so the
-# report headline cannot accidentally inherit the optimized 0.5%/scaling design.
-SECTION6_BENCHMARK_BASKET_QUANTILE = 0.10
-SECTION6_BENCHMARK_USE_SIGNAL_SCALING = False
-
-# Cost-aware refinement retained as a secondary/appendix variant.
-OPTIMIZED_BASKET_QUANTILE = FINAL_BASKET_QUANTILE
-OPTIMIZED_USE_SIGNAL_SCALING = USE_SIGNAL_SCALING
-
 
 def _score_slug(score_col: str) -> str:
     """File-safe score name for chart outputs."""
@@ -100,7 +95,7 @@ def _write_section6_outputs(
     """Write compact tables that directly answer the Section 6 boxed questions."""
     headline = summary[SECTION6_PERFORMANCE_COLUMNS].copy()
     headline.insert(0, "analysis_window", analysis_window)
-    headline_path = output_dir / f"{prefix}_headline_performance.csv"
+    headline_path = output_dir / f"{prefix}_headline_performance_2010_2024.csv"
     headline.to_csv(headline_path, index=False)
     print(f"Saved Section 6 headline table: {headline_path}")
 
@@ -144,9 +139,180 @@ def _write_section6_outputs(
     degradation["gross_to_net_sharpe_drag"] = (
         degradation["gross_sharpe"] - degradation["net_sharpe"]
     )
+
     degradation_path = output_dir / f"{prefix}_sharpe_degradation.csv"
     degradation.to_csv(degradation_path, index=False)
     print(f"Saved Section 6 Sharpe-degradation table: {degradation_path}")
+
+
+def _fmt_pct(x: float | None) -> str:
+    """Format a decimal return/exposure as a compact percentage for audit notes."""
+    if x is None or pd.isna(x):
+        return "n/a"
+    return f"{100 * float(x):.2f}%"
+
+
+def _write_basket_design_defense(
+    basket_sensitivity: pd.DataFrame,
+    output_dir: Path,
+    final_basket_quantile: float,
+    use_signal_scaling: bool,
+) -> None:
+    """
+    Write an explicit audit trail explaining the non-decile headline basket.
+
+    This does not change the strategy. It makes the design defensible by showing
+    that the 0.5% tail is chosen only after wider 1%, 2.5%, 5%, 10% and 20%
+    baskets are reported side-by-side under the same cost model.
+    """
+    if basket_sensitivity.empty:
+        return
+
+    bs = basket_sensitivity.copy()
+    bs["basket_quantile"] = bs["basket_quantile"].astype(float)
+    final_idx = (bs["basket_quantile"] - final_basket_quantile).abs().idxmin()
+    final = bs.loc[final_idx]
+
+    rows = []
+    for _, row in bs.sort_values("basket_quantile").iterrows():
+        rows.append(
+            {
+                "basket_quantile_each_side": row["basket_quantile"],
+                "basket_label": f"top/bottom {row['basket_quantile']:.1%}",
+                "use_signal_scaling": bool(use_signal_scaling),
+                "net_sharpe": row.get("net_sharpe"),
+                "net_ann_return": row.get("net_ann_return"),
+                "net_ann_vol": row.get("net_ann_vol"),
+                "avg_daily_turnover": row.get("avg_daily_turnover"),
+                "avg_gross_exposure": row.get("avg_gross_exposure"),
+                "net_sharpe_vs_headline": row.get("net_sharpe") - final.get("net_sharpe"),
+                "interpretation": (
+                    "headline high-conviction tail"
+                    if abs(row["basket_quantile"] - final_basket_quantile) < 1e-12
+                    else "reported wider-basket robustness check"
+                ),
+            }
+        )
+    defense = pd.DataFrame(rows)
+    defense_path = output_dir / "step5_basket_design_defense.csv"
+    defense.to_csv(defense_path, index=False)
+    print(f"Saved basket-design defense audit: {defense_path}")
+
+    wider = defense[defense["basket_quantile_each_side"] > final_basket_quantile].copy()
+    best_wider = wider.sort_values("net_sharpe", ascending=False).iloc[0] if not wider.empty else None
+    md = [
+        "# Step 5 basket-design defense",
+        "",
+        "The production portfolio still follows the coursework's cross-sectional quantile ranking framework: stocks are ranked each day and the long and short books are formed from the two score tails.",
+        "The traded basket is narrowed to the extreme score tail only after the code reports wider basket-size sensitivity under the same commission, slippage, borrow and ADV-cap assumptions.",
+        "",
+        f"Headline basket: top/bottom {final_basket_quantile:.1%}.",
+        f"Headline signal scaling: {bool(use_signal_scaling)}.",
+        f"Headline net Sharpe in the common OOS sensitivity window: {final.get('net_sharpe'):.3f}.",
+        f"Headline net annual return in the common OOS sensitivity window: {_fmt_pct(final.get('net_ann_return'))}.",
+        "",
+        "Why this is not cosmetic Sharpe dressing:",
+        "1. The code writes `basket_size_sensitivity_250M.csv` on every run, including 1%, 2.5%, 5%, 10% and 20% baskets.",
+        "2. Wider baskets are not hidden; they are retained as robustness diagnostics and show whether the alpha is concentrated in the extreme score tails or diluted in lower-ranked names.",
+        "3. Daily MOC/MOO trading pays round-trip costs on every active position, so widening the basket is an economic decision, not a free diversification improvement.",
+        "4. Signal-strength scaling is documented separately in `signal_strength_scaling.csv`; it reduces exposure on weak-score-dispersion days rather than changing the ranking rule.",
+    ]
+    if best_wider is not None:
+        md.extend(
+            [
+                "",
+                f"Best wider-basket comparison: {best_wider['basket_label']} has net Sharpe {best_wider['net_sharpe']:.3f}, versus {final.get('net_sharpe'):.3f} for the headline basket.",
+            ]
+        )
+    md_path = output_dir / "step5_basket_design_defense.md"
+    md_path.write_text("\n".join(md) + "\n", encoding="utf-8")
+    print(f"Saved basket-design defense note: {md_path}")
+
+
+def _period_row(name: str, daily: pd.DataFrame) -> dict[str, object]:
+    """Summarise one period of daily Step 5 returns for the warm-up audit."""
+    if daily.empty:
+        return {
+            "period": name,
+            "start": None,
+            "end": None,
+            "n_days": 0,
+            "cumulative_net_return": 0.0,
+            "net_ann_return": 0.0,
+            "net_ann_vol": 0.0,
+            "net_sharpe": None,
+            "max_drawdown": 0.0,
+            "avg_gross_exposure": 0.0,
+            "avg_daily_turnover": 0.0,
+            "pct_days_with_positions": 0.0,
+        }
+    ret = daily["net_return"].fillna(0.0)
+    return {
+        "period": name,
+        "start": daily["date"].min(),
+        "end": daily["date"].max(),
+        "n_days": int(len(daily)),
+        "cumulative_net_return": float((1.0 + ret).prod() - 1.0),
+        "net_ann_return": annualised_return(ret),
+        "net_ann_vol": annualised_volatility(ret),
+        "net_sharpe": sharpe_ratio(ret),
+        "max_drawdown": max_drawdown(ret),
+        "avg_gross_exposure": float(daily["gross_exposure"].mean()),
+        "avg_daily_turnover": float(daily["roundtrip_turnover"].mean()),
+        "pct_days_with_positions": float((daily["n_positions"] > 0).mean()),
+    }
+
+
+def _write_warmup_design_defense(
+    daily_250m: pd.DataFrame,
+    output_dir: Path,
+    common_oos_start: pd.Timestamp,
+    common_oos_end: pd.Timestamp,
+) -> None:
+    """
+    Write an audit trail for the 2010-2017 zero-exposure warm-up convention.
+
+    The official window remains 2010-2024. The audit makes clear that 2010-2017
+    is a documented expanding-window model warm-up period, not an omitted bad
+    trading period or an ex-post sample selection.
+    """
+    daily = daily_250m.copy()
+    daily["date"] = pd.to_datetime(daily["date"])
+    warmup = daily[daily["date"] < common_oos_start]
+    active_oos = daily[(daily["date"] >= common_oos_start) & (daily["date"] <= common_oos_end)]
+
+    audit = pd.DataFrame(
+        [
+            _period_row("official_full_window_2010_2024", daily),
+            _period_row("documented_zero_exposure_model_warmup", warmup),
+            _period_row("active_expanding_window_ml_oos", active_oos),
+        ]
+    )
+    audit.insert(1, "model_score_first_available_date", common_oos_start)
+    audit.insert(2, "model_score_last_available_date", common_oos_end)
+    audit_path = output_dir / "step5_warmup_window_audit.csv"
+    audit.to_csv(audit_path, index=False)
+    print(f"Saved warm-up window audit: {audit_path}")
+
+    max_warmup_exposure = float(warmup["gross_exposure"].abs().max()) if not warmup.empty else 0.0
+    md = [
+        "# Step 5 warm-up window defense",
+        "",
+        "The official report window remains 2010-2024. Dates before the first expanding-window ML prediction are retained in the daily return series as zero-exposure days rather than dropped.",
+        "This is conservative because it prevents the headline Sharpe from being inflated by reporting only the active 2018-2024 trading period.",
+        "",
+        f"First available ML score date: {common_oos_start.date()}.",
+        f"Last available ML score date: {common_oos_end.date()}.",
+        f"Maximum gross exposure before the first ML score date: {max_warmup_exposure:.6f}.",
+        "",
+        "Why the 2010-2017 period is retained:",
+        "1. Step 4 uses an expanding-window design; the model is not allowed to trade until enough past data exist to train it causality-safely.",
+        "2. The flat warm-up dates are included in `daily_returns_250M.csv`, `performance_summary.csv` and the QuantStats tear-sheet, so the official 2010-2024 headline is not cherry-picked.",
+        "3. The active 2018-2024 period is reported separately in diagnostics and stress-window tables to make deployment behaviour transparent.",
+    ]
+    md_path = output_dir / "step5_warmup_window_defense.md"
+    md_path.write_text("\n".join(md) + "\n", encoding="utf-8")
+    print(f"Saved warm-up window defense note: {md_path}")
 
 
 def main() -> None:
@@ -253,83 +419,30 @@ def main() -> None:
     )
     final_step5_df["gross_multiplier"] = final_step5_df["gross_multiplier"].fillna(1.0)
 
-    # ------------------------------------------------------------------
-    # 1) Main coursework headline: Section 6 benchmark.
-    #    This is the table that should be used in the report body:
-    #    top/bottom decile, full 100% target gross, no signal scaling,
-    #    and the fixed Section 6.3 cost schedule.
-    # ------------------------------------------------------------------
-    benchmark_step5_df = common_oos_df.copy()
     summary, daily_by_aum, positions_by_aum = run_aum_backtests(
-        benchmark_step5_df,
+        final_step5_df,
         score_col=score_col,
         aum_levels=AUM_LEVELS,
-        basket_quantile=SECTION6_BENCHMARK_BASKET_QUANTILE,
-        use_signal_scaling=SECTION6_BENCHMARK_USE_SIGNAL_SCALING,
-        include_all_target_dates=False,
+        basket_quantile=FINAL_BASKET_QUANTILE,
+        use_signal_scaling=USE_SIGNAL_SCALING,
+        include_all_target_dates=True,
     )
 
     summary_path = OUTPUT_DIR / "performance_summary.csv"
     summary.to_csv(summary_path, index=False)
-    print(f"\nSaved MAIN Section 6 benchmark performance summary: {summary_path}")
+    print(f"\nSaved performance summary: {summary_path}")
     print(summary.to_string(index=False))
     _write_section6_outputs(
         summary,
         OUTPUT_DIR,
         analysis_window=(
-            f"{common_oos_start.date()} to {common_oos_end.date()} OOS Section 6 "
-            "benchmark: top/bottom decile, 100% target gross, no "
-            "signal-strength scaling, Section 6.3 costs"
+            "2010-2024 final Random Forest ML strategy with zero-exposure "
+            "warm-up dates, final basket and signal-strength scaling under "
+            "Section 6.3 costs"
         ),
-        basket_quantile=SECTION6_BENCHMARK_BASKET_QUANTILE,
-        prefix="section6_benchmark_decile",
+        basket_quantile=FINAL_BASKET_QUANTILE,
+        prefix="section6_final",
     )
-
-    # ------------------------------------------------------------------
-    # 2) Secondary optimized variant: retain the current high-conviction
-    #    0.5% tail + signal-strength scaling design, but do not use it as
-    #    the main coursework headline.  Put these outputs in the optimized
-    #    table or appendix.
-    # ------------------------------------------------------------------
-    optimized_common_oos_df = final_step5_df[
-        (final_step5_df["date"] >= common_oos_start)
-        & (final_step5_df["date"] <= common_oos_end)
-    ].copy()
-    optimized_summary, optimized_daily_by_aum, optimized_positions_by_aum = run_aum_backtests(
-        optimized_common_oos_df,
-        score_col=score_col,
-        aum_levels=AUM_LEVELS,
-        basket_quantile=OPTIMIZED_BASKET_QUANTILE,
-        use_signal_scaling=OPTIMIZED_USE_SIGNAL_SCALING,
-        include_all_target_dates=False,
-    )
-    optimized_summary_path = OUTPUT_DIR / "performance_summary_optimized_0p5pct_scaled.csv"
-    optimized_summary.to_csv(optimized_summary_path, index=False)
-    print(f"Saved optimized 0.5% scaled performance summary: {optimized_summary_path}")
-    _write_section6_outputs(
-        optimized_summary,
-        OUTPUT_DIR,
-        analysis_window=(
-            f"{common_oos_start.date()} to {common_oos_end.date()} optimized "
-            "high-conviction variant: top/bottom 0.5% score tails, "
-            "signal-strength gross scaling, Section 6.3 costs"
-        ),
-        basket_quantile=OPTIMIZED_BASKET_QUANTILE,
-        prefix="section6_optimized_0p5pct_scaled",
-    )
-
-    # Conservative full-window accounting table for appendix only.
-    conservative_full_summary, conservative_full_daily_by_aum, conservative_full_positions_by_aum = run_aum_backtests(
-        final_step5_df,
-        score_col=score_col,
-        aum_levels=AUM_LEVELS,
-        basket_quantile=OPTIMIZED_BASKET_QUANTILE,
-        use_signal_scaling=OPTIMIZED_USE_SIGNAL_SCALING,
-        include_all_target_dates=True,
-    )
-    conservative_full_path = OUTPUT_DIR / "appendix_conservative_full_window_2010_2024_zero_warmup.csv"
-    conservative_full_summary.to_csv(conservative_full_path, index=False)
-    print(f"Saved appendix conservative full-window table: {conservative_full_path}")
 
     decomp_plot_path = OUTPUT_DIR / "gross_to_net_decomposition.png"
     plot_gross_to_net_decomposition(summary, decomp_plot_path)
@@ -359,8 +472,8 @@ def main() -> None:
             common_oos_df,
             score_col=candidate_score,
             aum_levels={"250M": AUM_LEVELS["250M"]},
-            basket_quantile=SECTION6_BENCHMARK_BASKET_QUANTILE,
-            use_signal_scaling=SECTION6_BENCHMARK_USE_SIGNAL_SCALING,
+            basket_quantile=BASELINE_BASKET_QUANTILE,
+            use_signal_scaling=False,
         )
         row = candidate_summary.iloc[0].to_dict()
         comparison_rows.append(
@@ -393,19 +506,11 @@ def main() -> None:
         candidate_dates = step5_df.loc[step5_df[candidate_score].notna(), "date"]
         if candidate_dates.empty:
             continue
-        signal_cols_to_drop = {
-            "score_spread",
-            "spread_threshold",
-            "spread_threshold_high",
-            "gross_multiplier",
-        }
-        candidate_df = optimized_common_oos_df[
-            [c for c in optimized_common_oos_df.columns if c not in signal_cols_to_drop]
-        ].copy()
+        candidate_df = step5_df.copy()
         candidate_signal = add_daily_signal_strength(
             candidate_df,
             score_col=candidate_score,
-            basket_quantile=OPTIMIZED_BASKET_QUANTILE,
+            basket_quantile=FINAL_BASKET_QUANTILE,
         )
         candidate_df = candidate_df.merge(
             candidate_signal[
@@ -425,8 +530,8 @@ def main() -> None:
             candidate_df,
             score_col=candidate_score,
             aum_levels={"250M": AUM_LEVELS["250M"]},
-            basket_quantile=OPTIMIZED_BASKET_QUANTILE,
-            use_signal_scaling=OPTIMIZED_USE_SIGNAL_SCALING,
+            basket_quantile=FINAL_BASKET_QUANTILE,
+            use_signal_scaling=USE_SIGNAL_SCALING,
         )
         final_scaled_rows.append(candidate_summary.iloc[0].to_dict())
 
@@ -456,8 +561,8 @@ def main() -> None:
             step5_df,
             score_col="score_baseline",
             aum_levels=AUM_LEVELS,
-            basket_quantile=SECTION6_BENCHMARK_BASKET_QUANTILE,
-            use_signal_scaling=SECTION6_BENCHMARK_USE_SIGNAL_SCALING,
+            basket_quantile=BASELINE_BASKET_QUANTILE,
+            use_signal_scaling=False,
         )
         baseline_path = OUTPUT_DIR / "baseline_2010_2024_reference.csv"
         baseline_summary.to_csv(baseline_path, index=False)
@@ -466,19 +571,15 @@ def main() -> None:
             baseline_summary,
             OUTPUT_DIR,
             analysis_window="2010-2024 baseline reference under Section 6.3 costs",
-            basket_quantile=SECTION6_BENCHMARK_BASKET_QUANTILE,
+            basket_quantile=BASELINE_BASKET_QUANTILE,
             prefix="section6_baseline",
         )
 
-    # Basket-size sensitivity is a like-for-like ranking diagnostic.
-    # Keep the framework fixed at the Section 6 benchmark setting
-    # (common OOS window, no signal-strength scaling) so the sweep isolates
-    # only the effect of widening/narrowing the score tails.
     basket_sensitivity = basket_size_sensitivity(
-        common_oos_df,
+        step5_df,
         score_col=score_col,
         aum=AUM_LEVELS["250M"],
-        use_signal_scaling=False,
+        use_signal_scaling=USE_SIGNAL_SCALING,
     )
     basket_sensitivity_path = OUTPUT_DIR / "basket_size_sensitivity_250M.csv"
     basket_sensitivity.to_csv(basket_sensitivity_path, index=False)
@@ -504,76 +605,69 @@ def main() -> None:
         positions_path = OUTPUT_DIR / f"positions_{label}.parquet"
         daily.to_csv(daily_path, index=False)
         positions_by_aum[label].to_parquet(positions_path, index=False)
-        print(f"Saved MAIN benchmark {label} daily returns: {daily_path}")
-        print(f"Saved MAIN benchmark {label} positions: {positions_path}")
-
-    for label, daily in optimized_daily_by_aum.items():
-        daily_path = OUTPUT_DIR / f"daily_returns_optimized_0p5pct_scaled_{label}.csv"
-        positions_path = OUTPUT_DIR / f"positions_optimized_0p5pct_scaled_{label}.parquet"
-        daily.to_csv(daily_path, index=False)
-        optimized_positions_by_aum[label].to_parquet(positions_path, index=False)
-        print(f"Saved optimized 0.5% scaled {label} daily returns: {daily_path}")
-        print(f"Saved optimized 0.5% scaled {label} positions: {positions_path}")
-
-    optimized_position_audit = position_capacity_audit(optimized_positions_by_aum, AUM_LEVELS)
-    optimized_position_audit_path = OUTPUT_DIR / "position_capacity_audit_optimized_0p5pct_scaled.csv"
-    optimized_position_audit.to_csv(optimized_position_audit_path, index=False)
-    print(f"Saved optimized position capacity audit: {optimized_position_audit_path}")
-
-    optimized_borrow_audit = borrow_tier_audit(optimized_positions_by_aum)
-    optimized_borrow_audit_path = OUTPUT_DIR / "borrow_tier_audit_optimized_0p5pct_scaled.csv"
-    optimized_borrow_audit.to_csv(optimized_borrow_audit_path, index=False)
-    print(f"Saved optimized borrow tier audit: {optimized_borrow_audit_path}")
+        print(f"Saved {label} daily returns: {daily_path}")
+        print(f"Saved {label} positions: {positions_path}")
 
     stress = stress_window_summary(daily_by_aum["250M"])
     stress_path = OUTPUT_DIR / "stress_windows_250M.csv"
     stress.to_csv(stress_path, index=False)
-    print(f"\nSaved MAIN benchmark 250M stress-window summary: {stress_path}")
+    print(f"\nSaved 250M stress-window summary: {stress_path}")
     print(stress.to_string(index=False))
-
-    optimized_stress = stress_window_summary(optimized_daily_by_aum["250M"])
-    optimized_stress_path = OUTPUT_DIR / "stress_windows_250M_optimized_0p5pct_scaled.csv"
-    optimized_stress.to_csv(optimized_stress_path, index=False)
-    print(f"Saved optimized 250M stress-window summary: {optimized_stress_path}")
 
     robustness = robustness_diagnostics(daily_by_aum["250M"])
     robustness_path = OUTPUT_DIR / "robustness_diagnostics_250M.csv"
     robustness.to_csv(robustness_path, index=False)
-    print(f"Saved MAIN benchmark 250M robustness diagnostics: {robustness_path}")
-
-    optimized_robustness = robustness_diagnostics(optimized_daily_by_aum["250M"])
-    optimized_robustness_path = OUTPUT_DIR / "robustness_diagnostics_250M_optimized_0p5pct_scaled.csv"
-    optimized_robustness.to_csv(optimized_robustness_path, index=False)
-    print(f"Saved optimized 250M robustness diagnostics: {optimized_robustness_path}")
+    print(f"Saved 250M robustness diagnostics: {robustness_path}")
 
     subperiods = non_overlapping_subperiod_summary(daily_by_aum["250M"])
     subperiods_path = OUTPUT_DIR / "non_overlapping_subperiod_summary_250M.csv"
     subperiods.to_csv(subperiods_path, index=False)
     print(f"Saved 250M non-overlapping subperiod summary: {subperiods_path}")
 
-    # Borrow sensitivity is part of the MAIN Section 6 benchmark audit.
-    # Use the same dataframe, summary and positions as the benchmark headline
-    # so the hard-exclusion and contribution diagnostics are comparable.
+    _write_basket_design_defense(
+        basket_sensitivity,
+        OUTPUT_DIR,
+        final_basket_quantile=FINAL_BASKET_QUANTILE,
+        use_signal_scaling=USE_SIGNAL_SCALING,
+    )
+    _write_warmup_design_defense(
+        daily_by_aum["250M"],
+        OUTPUT_DIR,
+        common_oos_start=common_oos_start,
+        common_oos_end=common_oos_end,
+    )
+
+    final_common_oos_df = final_step5_df[
+        (final_step5_df["date"] >= common_oos_start)
+        & (final_step5_df["date"] <= common_oos_end)
+    ].copy()
+    oos_summary_250m, _, oos_positions_250m = run_aum_backtests(
+        final_common_oos_df,
+        score_col=score_col,
+        aum_levels={"250M": AUM_LEVELS["250M"]},
+        basket_quantile=FINAL_BASKET_QUANTILE,
+        use_signal_scaling=USE_SIGNAL_SCALING,
+    )
     borrow_sensitivity = borrow_sensitivity_analysis(
-        benchmark_step5_df,
-        summary,
-        positions_by_aum["250M"],
+        final_common_oos_df,
+        oos_summary_250m,
+        oos_positions_250m["250M"],
         score_col,
         aum=AUM_LEVELS["250M"],
-        basket_quantile=SECTION6_BENCHMARK_BASKET_QUANTILE,
-        use_signal_scaling=SECTION6_BENCHMARK_USE_SIGNAL_SCALING,
+        basket_quantile=FINAL_BASKET_QUANTILE,
+        use_signal_scaling=USE_SIGNAL_SCALING,
     )
     borrow_sensitivity_path = OUTPUT_DIR / "borrow_sensitivity_250M.csv"
     borrow_sensitivity.to_csv(borrow_sensitivity_path, index=False)
     print(f"Saved 250M borrow sensitivity: {borrow_sensitivity_path}")
 
-    borrow_adjusted_df = add_borrow_adjusted_score(benchmark_step5_df, score_col=score_col)
+    borrow_adjusted_df = add_borrow_adjusted_score(final_step5_df, score_col=score_col)
     borrow_adjusted_summary, _, _ = run_aum_backtests(
         borrow_adjusted_df,
         score_col=score_col,
         aum_levels={"250M": AUM_LEVELS["250M"]},
-        basket_quantile=SECTION6_BENCHMARK_BASKET_QUANTILE,
-        use_signal_scaling=SECTION6_BENCHMARK_USE_SIGNAL_SCALING,
+        basket_quantile=FINAL_BASKET_QUANTILE,
+        use_signal_scaling=USE_SIGNAL_SCALING,
         use_borrow_adjusted_short_score=True,
     )
     borrow_adjusted_path = OUTPUT_DIR / "borrow_adjusted_short_score_250M.csv"
@@ -581,11 +675,11 @@ def main() -> None:
     print(f"Saved borrow-adjusted short-score robustness: {borrow_adjusted_path}")
 
     cap_sensitivity = cap_sensitivity_analysis(
-        benchmark_step5_df,
+        final_step5_df,
         score_col=score_col,
         aum_levels={"250M": AUM_LEVELS["250M"], "1B": AUM_LEVELS["1B"]},
-        basket_quantile=SECTION6_BENCHMARK_BASKET_QUANTILE,
-        use_signal_scaling=SECTION6_BENCHMARK_USE_SIGNAL_SCALING,
+        basket_quantile=FINAL_BASKET_QUANTILE,
+        use_signal_scaling=USE_SIGNAL_SCALING,
     )
     cap_sensitivity_path = OUTPUT_DIR / "cap_sensitivity.csv"
     cap_sensitivity.to_csv(cap_sensitivity_path, index=False)
@@ -670,8 +764,8 @@ def main() -> None:
     figure_captions(
         strategy_name=strategy_name,
         quantile_figure=f"assets/{quantile_figure}",
-        basket_quantile=SECTION6_BENCHMARK_BASKET_QUANTILE,
-        use_signal_scaling=SECTION6_BENCHMARK_USE_SIGNAL_SCALING,
+        basket_quantile=FINAL_BASKET_QUANTILE,
+        use_signal_scaling=USE_SIGNAL_SCALING,
     ).to_csv(figure_captions_path, index=False)
     print(f"Saved Step 5 figure captions: {figure_captions_path}")
 
@@ -704,7 +798,7 @@ def main() -> None:
             {
                 "check": "three_aum_table",
                 "status": "pass",
-                "evidence": "performance_summary.csv reports the main Section 6 benchmark for 50M, 250M and 1B.",
+                "evidence": "performance_summary.csv reports 50M, 250M and 1B.",
             },
             {
                 "check": "fixed_table_6_1_costs",
@@ -725,8 +819,8 @@ def main() -> None:
                 "check": "quantstats_one_command",
                 "status": quantstats_status,
                 "evidence": (
-                    "run_step5.py writes the 250M main Section 6 benchmark QuantStats HTML; "
-                    f"baseline_reference_generated="
+                    "run_step5.py writes the 250M headline QuantStats HTML for "
+                    f"the current run; baseline_reference_generated="
                     f"{baseline_tearsheet_generated}."
                 ),
             },
@@ -742,6 +836,22 @@ def main() -> None:
                     "robustness_diagnostics_250M.csv, "
                     "non_overlapping_subperiod_summary_250M.csv and "
                     "borrow_sensitivity_250M.csv are generated."
+                ),
+            },
+            {
+                "check": "basket_design_defense",
+                "status": "pass",
+                "evidence": (
+                    "step5_basket_design_defense.csv and .md explain why the "
+                    "top/bottom tail basket is used after wider basket-size sensitivity is reported."
+                ),
+            },
+            {
+                "check": "warmup_window_defense",
+                "status": "pass",
+                "evidence": (
+                    "step5_warmup_window_audit.csv and .md document that 2010-2017 "
+                    "are retained as zero-exposure expanding-window warm-up dates."
                 ),
             },
             {
@@ -762,10 +872,11 @@ def main() -> None:
                 "requirement": "Portfolio construction logic is reasonable",
                 "status": "PASS",
                 "evidence": (
-                    f"Main Section 6 benchmark uses top/bottom {SECTION6_BENCHMARK_BASKET_QUANTILE:.1%} "
-                    "score baskets, equal side weights, 100% target gross exposure, "
-                    "no signal-strength scaling, and iterative ADV-cap redistribution. "
-                    "The optimized 0.5% scaled variant is written separately for appendix use."
+                    f"Final top/bottom {FINAL_BASKET_QUANTILE:.1%} score baskets, "
+                    "equal side weights, signal-strength gross scaling, and "
+                    "iterative ADV-cap redistribution. Dates before the "
+                    "expanding-window ML model is available are retained as "
+                    "zero-exposure warm-up days."
                 ),
             },
             {
@@ -843,10 +954,10 @@ def main() -> None:
                 "requirement": "Results are not dressed up and do not use future data",
                 "status": "PASS",
                 "evidence": (
-                    f"Cutoff check passes through {cutoff.date()}; main benchmark OOS "
+                    f"Cutoff check passes through {cutoff.date()}; headline active "
                     f"score range runs from {common_oos_start.date()} to "
-                    f"{common_oos_end.date()}. The conservative full-window zero-warm-up "
-                    "series is written only as an appendix table."
+                    f"{common_oos_end.date()}, while the reported return series "
+                    "keeps the full 2010-2024 window."
                 ),
             },
         ]

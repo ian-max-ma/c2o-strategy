@@ -262,7 +262,7 @@ def cost_aware_decile_summary(
 
 def plot_decile_spread(
     decile_df: pd.DataFrame,
-    output_path: str | Path,
+    output_path: object,
     title: str = "Baseline Score Decile Spread",
     ) -> None:
     """
@@ -287,7 +287,7 @@ def plot_decile_spread(
 
 def plot_ic_summary(
     ic_df: pd.DataFrame,
-    output_path: str | Path,
+    output_path: object,
     title: str = "Mean Daily Spearman IC",
     n_top_features: int = 10,
 ) -> None:

@@ -47,3 +47,16 @@ notebooks/
 notebooks
 
 notebooks
+
+# local large data / generated ML panels
+data/
+outputs/*.parquet
+
+# large Step 5 generated positions
+step5_portfolio/output/positions_*.parquet
+
+# local environments and backups
+.venv/
+*_backup_before_*/
+run_step5_backup_before_*.py
+step5_portfolio_backup_before_*/
