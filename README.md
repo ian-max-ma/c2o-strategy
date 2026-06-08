@@ -4,7 +4,24 @@ C2O overnight strategy for the Machine Learning in Finance coursework.
 
 ## Reproduce
 
-Install the dependencies, place the coursework data in `data/`, then run:
+Install dependencies:
+
+```bash
+pip install -r requirements.txt
+```
+
+Place the five coursework data files in `data/`:
+
+```
+data/
+  prices.parquet
+  sp500_tr.parquet
+  sp500_constituents.parquet
+  earnings_calendar.parquet
+  short_interest_transfo.parquet
+```
+
+Then run:
 
 ```bash
 python run_all.py
